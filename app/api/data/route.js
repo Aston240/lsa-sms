@@ -1,7 +1,7 @@
 import { createClient } from "redis";
 
 async function getClient() {
-  const url = process.env.REDIS_URL;
+  const url = process.env.MY_REDIS_URL || process.env.REDIS_URL;
   console.log("REDIS_URL starts with:", url ? url.substring(0, 20) : "UNDEFINED");
   const client = createClient({ url });
   await client.connect();
