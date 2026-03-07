@@ -256,9 +256,7 @@ function RiskRegister({ risks, setRisks, actions, setActions, raiseTarget, onRai
       picType: raiseTarget.picType || "",
       location: raiseTarget.location || "",
       operationalArea: raiseTarget.operationalArea || "",
-      hazardDescription: raiseTarget.title + (raiseTarget.what ? "
-
-" + raiseTarget.what : ""),
+      hazardDescription: raiseTarget.title + (raiseTarget.what ? "\n\n" + raiseTarget.what : ""),
       potentialConsequence: "",
       hazardCategory: "",
       initSeverity: 1,
