@@ -1,8 +1,9 @@
 import { createClient } from "redis";
 
+const REDIS_URL = "redis://default:cxNPTRSnRKZinIQXsYAMKa7t5AM1rHV4@redis-17938.crce204.eu-west-2-3.ec2.cloud.redislabs.com:17938";
+
 async function getClient() {
-  const url = process.env.MY_REDIS_URL || process.env.REDIS_URL;
-  const client = createClient({ url });
+  const client = createClient({ url: REDIS_URL });
   await client.connect();
   return client;
 }
@@ -13,13 +14,11 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const key = searchParams.get("key");
     if (!key) return Response.json({ error: "No key" }, { status: 400 });
-    const url = process.env.MY_REDIS_URL || process.env.REDIS_URL;
-    if (!url) return Response.json({ error: "REDIS_URL not set" }, { status: 500 });
     redis = await getClient();
     const raw = await redis.get(key);
     return Response.json({ value: raw ? JSON.parse(raw) : null });
   } catch (err) {
-    return Response.json({ error: "Server error", detail: err.message, url_defined: !!url }, { status: 500 });
+    return Response.json({ error: "Server error", detail: err.message }, { status: 500 });
   } finally {
     if (redis) await redis.disconnect();
   }
