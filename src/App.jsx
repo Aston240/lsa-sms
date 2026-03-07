@@ -397,7 +397,7 @@ function ExcelImport({ reports, onImport }) {
     setStatus(null); setPreview(null);
 
     try {
-      const { read, utils } = await import("https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs");
+      const { read, utils } = await import("xlsx");
       const buf = await file.arrayBuffer();
       const wb = read(buf);
       const ws = wb.Sheets[wb.SheetNames[0]];
