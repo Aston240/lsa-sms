@@ -70,11 +70,18 @@ const riskLevel = score => { if (score <= 4) return { label: "Low", color: "#22c
 const isOverdue = (targetDate, status) => !!(targetDate && status !== "Closed" && new Date(targetDate) < new Date());
 const fmt = d => d ? new Date(d).toLocaleDateString("en-GB") : "—";
 
-async function loadFromStorage(key, fallback) {
-  try { const res = await window.storage.get(key); return res ? JSON.parse(res.value) : fallback; } catch { return fallback; }
+function loadFromStorage(key, fallback) {
+  try {
+    if (typeof window === 'undefined') return fallback;
+    const val = localStorage.getItem(key);
+    return val ? JSON.parse(val) : fallback;
+  } catch { return fallback; }
 }
-async function saveToStorage(key, value) {
-  try { await window.storage.set(key, JSON.stringify(value)); } catch {}
+function saveToStorage(key, value) {
+  try {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
 }
 
 // ── styles ────────────────────────────────────────────────────────────────────
@@ -710,15 +717,11 @@ export default function App() {
   const [ready, setReady] = useState(false);
 
   useEffect(()=>{
-    (async()=>{
-      const [r,ri,a,s] = await Promise.all([
-        loadFromStorage("sms:reports", SEED_REPORTS),
-        loadFromStorage("sms:risks", SEED_RISKS),
-        loadFromStorage("sms:actions", SEED_ACTIONS),
-        loadFromStorage("sms:webhookSecret", "lsa-sms-secret"),
-      ]);
-      setReports(r); setRisks(ri); setActions(a); setWebhookSecret(s); setReady(true);
-    })();
+    const r = loadFromStorage("sms:reports", SEED_REPORTS);
+    const ri = loadFromStorage("sms:risks", SEED_RISKS);
+    const a = loadFromStorage("sms:actions", SEED_ACTIONS);
+    const s = loadFromStorage("sms:webhookSecret", "lsa-sms-secret");
+    setReports(r); setRisks(ri); setActions(a); setWebhookSecret(s); setReady(true);
   },[]);
 
   useEffect(()=>{ if(reports) saveToStorage("sms:reports", reports); },[reports]);
