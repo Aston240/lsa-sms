@@ -70,17 +70,20 @@ const riskLevel = score => { if (score <= 4) return { label: "Low", color: "#22c
 const isOverdue = (targetDate, status) => !!(targetDate && status !== "Closed" && new Date(targetDate) < new Date());
 const fmt = d => d ? new Date(d).toLocaleDateString("en-GB") : "—";
 
-function loadFromStorage(key, fallback) {
+async function loadFromStorage(key, fallback) {
   try {
-    if (typeof window === 'undefined') return fallback;
-    const val = localStorage.getItem(key);
-    return val ? JSON.parse(val) : fallback;
+    const res = await fetch('/api/data?key=' + encodeURIComponent(key));
+    const data = await res.json();
+    return data.value ?? fallback;
   } catch { return fallback; }
 }
-function saveToStorage(key, value) {
+async function saveToStorage(key, value) {
   try {
-    if (typeof window === 'undefined') return;
-    localStorage.setItem(key, JSON.stringify(value));
+    await fetch('/api/data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, value }),
+    });
   } catch {}
 }
 
@@ -717,11 +720,15 @@ export default function App() {
   const [ready, setReady] = useState(false);
 
   useEffect(()=>{
-    const r = loadFromStorage("sms:reports", SEED_REPORTS);
-    const ri = loadFromStorage("sms:risks", SEED_RISKS);
-    const a = loadFromStorage("sms:actions", SEED_ACTIONS);
-    const s = loadFromStorage("sms:webhookSecret", "lsa-sms-secret");
-    setReports(r); setRisks(ri); setActions(a); setWebhookSecret(s); setReady(true);
+    (async()=>{
+      const [r,ri,a,s] = await Promise.all([
+        loadFromStorage("sms:reports", SEED_REPORTS),
+        loadFromStorage("sms:risks", SEED_RISKS),
+        loadFromStorage("sms:actions", SEED_ACTIONS),
+        loadFromStorage("sms:webhookSecret", "lsa-sms-secret"),
+      ]);
+      setReports(r); setRisks(ri); setActions(a); setWebhookSecret(s); setReady(true);
+    })();
   },[]);
 
   useEffect(()=>{ if(reports) saveToStorage("sms:reports", reports); },[reports]);
