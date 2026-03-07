@@ -66,11 +66,11 @@ const Input = ({ label, value, onChange, type="text", options, required, rows })
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 function Dashboard({ reports, risks, actions }) {
-  const fromForms = reports.filter(r => r.source === "forms").length;
-  const closedReports = risks.filter(r => r.status === "Closed").length;
+  const closedRisks = risks.filter(r => r.status === "Closed").length;
   const openActions = actions.filter(a => a.status !== "Closed").length;
   const overdueActions = actions.filter(a => isOverdue(a.targetDate, a.status)).length;
   const highRisks = risks.filter(r => riskScore(r.initSeverity, r.initLikelihood) >= 10).length;
+  const pendingReports = reports.filter(r => !r.acknowledged).length;
   const byCat = {}; risks.forEach(r => { byCat[r.hazardCategory] = (byCat[r.hazardCategory]||0)+1; });
   const catEntries = Object.entries(byCat).sort((a,b)=>b[1]-a[1]);
   const byAc = {}; risks.forEach(r => { byAc[r.aircraft] = (byAc[r.aircraft]||0)+1; });
@@ -78,11 +78,15 @@ function Dashboard({ reports, risks, actions }) {
   const byMonth = {}; reports.forEach(r => { const m=r.incidentDate.slice(0,7); byMonth[m]=(byMonth[m]||0)+1; });
   const monthEntries = Object.entries(byMonth).sort();
   const maxCat = catEntries[0]?.[1]||1, maxAc = acEntries[0]?.[1]||1, maxMonth = Math.max(...Object.values(byMonth),1);
-  const highRiskItems = risks.filter(r=>riskScore(r.initSeverity,r.initLikelihood)>=8 && r.status!=="Closed").slice(0,5);
+  const BAR_COLORS = ["#38bdf8","#a78bfa","#22c55e","#f59e0b","#ef4444","#818cf8","#34d399","#fb923c","#e879f9","#facc15","#60a5fa","#f472b6"];
+  const attentionItems = [
+    ...reports.filter(r=>!r.acknowledged).map(r=>({type:"report",label:`Report: ${r.title}`,sub:`#${r.id} · ${fmt(r.incidentDate)}`,color:"#f59e0b"})),
+    ...actions.filter(a=>isOverdue(a.targetDate,a.status)).map(a=>({type:"action",label:`Overdue: ${a.description||a.id}`,sub:`${a.hazardId} · Due ${fmt(a.targetDate)}`,color:"#ef4444"})),
+  ];
   return (
     <div style={{display:"flex",flexDirection:"column",gap:24}}>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:16}}>
-        {[{label:"Total Reports",value:reports.length,color:"#38bdf8"},{label:"Via MS Forms",value:fromForms,color:"#818cf8"},{label:"Closed",value:closedReports,color:"#22c55e"},{label:"Open Actions",value:openActions,color:"#f59e0b"},{label:"Overdue",value:overdueActions,color:"#ef4444"},{label:"High / Intolerable",value:highRisks,color:"#7c3aed"}].map(k=>(
+        {[{label:"Total Reports",value:reports.length,color:"#38bdf8"},{label:"Pending Review",value:pendingReports,color:"#f59e0b"},{label:"Closed Risks",value:closedRisks,color:"#22c55e"},{label:"Open Actions",value:openActions,color:"#818cf8"},{label:"Overdue",value:overdueActions,color:"#ef4444"},{label:"High / Intolerable",value:highRisks,color:"#7c3aed"}].map(k=>(
           <div key={k.label} style={{background:"#0f172a",border:`1px solid ${k.color}33`,borderRadius:10,padding:"18px 20px"}}>
             <div style={{fontSize:32,fontWeight:800,color:k.color,fontFamily:"'Bebas Neue',sans-serif",lineHeight:1}}>{k.value}</div>
             <div style={{fontSize:11,color:"#64748b",marginTop:4,letterSpacing:".5px",textTransform:"uppercase"}}>{k.label}</div>
@@ -92,6 +96,7 @@ function Dashboard({ reports, risks, actions }) {
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
         <div style={cardStyle}>
           <div style={cardHead}>Reports by Hazard Category</div>
+          {catEntries.length===0 && <div style={{color:"#475569",fontSize:13}}>No data yet.</div>}
           {catEntries.map(([cat,n])=>(
             <div key={cat} style={{marginBottom:10}}>
               <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}><span style={{color:"#94a3b8"}}>{cat}</span><span style={{color:"#e2e8f0",fontWeight:700}}>{n}</span></div>
@@ -101,6 +106,7 @@ function Dashboard({ reports, risks, actions }) {
         </div>
         <div style={cardStyle}>
           <div style={cardHead}>Reports by Aircraft</div>
+          {acEntries.length===0 && <div style={{color:"#475569",fontSize:13}}>No data yet.</div>}
           {acEntries.map(([ac,n])=>(
             <div key={ac} style={{marginBottom:10}}>
               <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}><span style={{color:"#94a3b8"}}>{ac}</span><span style={{color:"#e2e8f0",fontWeight:700}}>{n}</span></div>
@@ -112,25 +118,28 @@ function Dashboard({ reports, risks, actions }) {
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
         <div style={cardStyle}>
           <div style={cardHead}>Incidents by Month</div>
-          <div style={{display:"flex",gap:8,alignItems:"flex-end",height:90,marginTop:8}}>
-            {monthEntries.map(([m,n])=>(
+          {monthEntries.length===0 && <div style={{color:"#475569",fontSize:13}}>No data yet.</div>}
+          <div style={{display:"flex",gap:6,alignItems:"flex-end",height:110,marginTop:12}}>
+            {monthEntries.map(([m,n],i)=>(
               <div key={m} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
-                <div style={{width:"100%",background:"#22c55e",borderRadius:"4px 4px 0 0",height:`${(n/maxMonth)*70}px`,minHeight:4}}/>
-                <span style={{fontSize:9,color:"#475569"}}>{m.slice(5)}/{m.slice(2,4)}</span>
+                <span style={{fontSize:11,color:"#e2e8f0",fontWeight:700}}>{n}</span>
+                <div style={{width:"100%",background:BAR_COLORS[i%BAR_COLORS.length],borderRadius:"4px 4px 0 0",height:`${Math.max((n/maxMonth)*70,4)}px`}}/>
+                <span style={{fontSize:9,color:"#475569",textAlign:"center"}}>{m.slice(5)}/{m.slice(2,4)}</span>
               </div>
             ))}
           </div>
         </div>
         <div style={cardStyle}>
           <div style={cardHead}>⚠ Items Needing Attention</div>
-          {highRiskItems.length===0 && <div style={{color:"#64748b",fontSize:13}}>No high-risk open items.</div>}
-          {highRiskItems.map(r=>{const score=riskScore(r.initSeverity,r.initLikelihood);const{label,color}=riskLevel(score);return(
-            <div key={r.id} style={{borderLeft:`3px solid ${color}`,paddingLeft:10,marginBottom:12}}>
-              <div style={{fontSize:12,fontWeight:700,color:"#e2e8f0"}}>{r.id}</div>
-              <div style={{fontSize:11,color:"#94a3b8"}}>{r.hazardDescription.split("\n")[0]}</div>
-              <div style={{marginTop:3}}><Badge color={color}>{score} – {label}</Badge></div>
-            </div>
-          );})}
+          {attentionItems.length===0
+            ? <div style={{display:"flex",alignItems:"center",gap:8,color:"#22c55e",fontSize:13,fontWeight:600}}><span style={{fontSize:18}}>✓</span> All Clear — no pending reports or overdue actions.</div>
+            : attentionItems.map((item,i)=>(
+              <div key={i} style={{borderLeft:`3px solid ${item.color}`,paddingLeft:10,marginBottom:12}}>
+                <div style={{fontSize:12,fontWeight:700,color:"#e2e8f0"}}>{item.label}</div>
+                <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>{item.sub}</div>
+              </div>
+            ))
+          }
         </div>
       </div>
     </div>
@@ -170,9 +179,23 @@ function SubmitReport({ onSubmit }) {
 // ── Raw Reports ───────────────────────────────────────────────────────────────
 function RawReports({ reports, onRaise, setReports }) {
   const [search, setSearch] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(null);
   const filtered = reports.filter(r=>r.title.toLowerCase().includes(search.toLowerCase())||r.aircraft.toLowerCase().includes(search.toLowerCase()));
+  const doDelete = id => { setReports(prev=>prev.filter(r=>r.id!==id)); setConfirmDelete(null); };
   return (
     <div>
+      {confirmDelete && (
+        <div style={{position:"fixed",inset:0,background:"#00000088",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div style={{background:"#0f172a",border:"1px solid #ef4444",borderRadius:10,padding:28,maxWidth:400,width:"90%"}}>
+            <div style={{fontSize:16,fontWeight:700,color:"#e2e8f0",marginBottom:8}}>Delete Report?</div>
+            <div style={{fontSize:13,color:"#94a3b8",marginBottom:20}}>Are you sure you want to delete report <strong style={{color:"#38bdf8"}}>#{confirmDelete.id} — {confirmDelete.title}</strong>? This cannot be undone.</div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>doDelete(confirmDelete.id)} style={{...btnPrimary,background:"#ef4444"}}>Yes, Delete</button>
+              <button onClick={()=>setConfirmDelete(null)} style={btnSecondary}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
         <h2 style={h2Style}>Raw Reports ({filtered.length})</h2>
         <input placeholder="Search…" value={search} onChange={e=>setSearch(e.target.value)} style={{...inputStyle,width:200}} />
@@ -192,11 +215,12 @@ function RawReports({ reports, onRaise, setReports }) {
               <td style={tdStyle}>{r.reporterDetails||<span style={{color:"#475569"}}>Anonymous</span>}</td>
               <td style={tdStyle}>{r.acknowledged ? <Badge color="#22c55e">✓ Acknowledged</Badge> : <Badge color="#f59e0b">Pending Review</Badge>}</td>
               <td style={tdStyle}>
-                {!r.acknowledged && (
-                  <button onClick={()=>onRaise(r)} style={{...btnSmall,background:"#0ea5e933",color:"#38bdf8",border:"1px solid #0ea5e955"}}>
-                    ↗ Raise to Risk Register
-                  </button>
-                )}
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {!r.acknowledged && (
+                    <button onClick={()=>onRaise(r)} style={{...btnSmall,background:"#0ea5e933",color:"#38bdf8",border:"1px solid #0ea5e955"}}>↗ Raise</button>
+                  )}
+                  <button onClick={()=>setConfirmDelete(r)} style={{...btnSmall,background:"#ef444422",color:"#ef4444",border:"1px solid #ef444444"}}>🗑</button>
+                </div>
               </td>
             </tr>
           ))}</tbody>
@@ -211,6 +235,7 @@ function RiskRegister({ risks, setRisks, actions, setActions, raiseTarget, onRai
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
+  const [confirmDeleteRisk, setConfirmDeleteRisk] = useState(null);
   const filtered = risks.filter(r=>(!search||(r.id+r.hazardDescription+r.aircraft).toLowerCase().includes(search.toLowerCase()))&&(!filterStatus||r.status===filterStatus));
   const save = updated => { setRisks(prev=>prev.map(r=>r.id===updated.id?updated:r)); setEditing(null); };
   const addAction = newAction => {
@@ -265,6 +290,18 @@ function RiskRegister({ risks, setRisks, actions, setActions, raiseTarget, onRai
   if (editing) return <RiskEditor risk={editing} onSave={save} onCancel={()=>setEditing(null)} onAddAction={addAction} />;
   return (
     <div>
+      {confirmDeleteRisk && (
+        <div style={{position:"fixed",inset:0,background:"#00000088",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div style={{background:"#0f172a",border:"1px solid #ef4444",borderRadius:10,padding:28,maxWidth:400,width:"90%"}}>
+            <div style={{fontSize:16,fontWeight:700,color:"#e2e8f0",marginBottom:8}}>Delete Risk Entry?</div>
+            <div style={{fontSize:13,color:"#94a3b8",marginBottom:20}}>Are you sure you want to delete <strong style={{color:"#38bdf8"}}>{confirmDeleteRisk.id}</strong>? This cannot be undone.</div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>{ setRisks(prev=>prev.filter(r=>r.id!==confirmDeleteRisk.id)); setConfirmDeleteRisk(null); }} style={{...btnPrimary,background:"#ef4444"}}>Yes, Delete</button>
+              <button onClick={()=>setConfirmDeleteRisk(null)} style={btnSecondary}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:16,flexWrap:"wrap"}}>
         <h2 style={{...h2Style,marginBottom:0}}>Risk Register ({filtered.length})</h2>
         <input placeholder="Search…" value={search} onChange={e=>setSearch(e.target.value)} style={{...inputStyle,width:200}} />
@@ -288,7 +325,7 @@ function RiskRegister({ risks, setRisks, actions, setActions, raiseTarget, onRai
               <td style={tdStyle}><Badge color={color}>{score} – {label}</Badge></td>
               <td style={tdStyle}><StatusBadge status={r.status}/></td>
               <td style={{...tdStyle,fontSize:12}}>{r.actionOwner}</td>
-              <td style={tdStyle}><div style={{display:"flex",gap:6}}><button onClick={()=>setEditing(r)} style={btnSmall}>Edit</button>{overdue&&<Badge color="#ef4444">OVERDUE</Badge>}</div></td>
+              <td style={tdStyle}><div style={{display:"flex",gap:6,alignItems:"center"}}><button onClick={()=>setEditing(r)} style={btnSmall}>Edit</button>{overdue&&<Badge color="#ef4444">OVERDUE</Badge>}<button onClick={()=>setConfirmDeleteRisk(r)} style={{...btnSmall,background:"#ef444422",color:"#ef4444",border:"1px solid #ef444444"}}>🗑</button></div></td>
             </tr>);
           })}</tbody>
         </table>
@@ -368,12 +405,25 @@ function ActionLog({ actions, setActions, risks }) {
   const [editing, setEditing] = useState(null);
   const [filterOwner, setFilterOwner] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
+  const [confirmDeleteAction, setConfirmDeleteAction] = useState(null);
   const owners = [...new Set(actions.map(a=>a.owner))];
   const filtered = actions.filter(a=>(!filterOwner||a.owner===filterOwner)&&(!filterStatus||a.status===filterStatus));
   const save = updated => { setActions(prev=>prev.map(a=>a.id===updated.id?updated:a)); setEditing(null); };
   if (editing) return <ActionEditor action={editing} risks={risks} onSave={save} onCancel={()=>setEditing(null)} />;
   return (
     <div>
+      {confirmDeleteAction && (
+        <div style={{position:"fixed",inset:0,background:"#00000088",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div style={{background:"#0f172a",border:"1px solid #ef4444",borderRadius:10,padding:28,maxWidth:400,width:"90%"}}>
+            <div style={{fontSize:16,fontWeight:700,color:"#e2e8f0",marginBottom:8}}>Delete Action?</div>
+            <div style={{fontSize:13,color:"#94a3b8",marginBottom:20}}>Are you sure you want to delete action <strong style={{color:"#38bdf8"}}>{confirmDeleteAction.id}</strong>? This cannot be undone.</div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>{ setActions(prev=>prev.filter(a=>a.id!==confirmDeleteAction.id)); setConfirmDeleteAction(null); }} style={{...btnPrimary,background:"#ef4444"}}>Yes, Delete</button>
+              <button onClick={()=>setConfirmDeleteAction(null)} style={btnSecondary}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:16,flexWrap:"wrap"}}>
         <h2 style={{...h2Style,marginBottom:0}}>Action Log ({filtered.length})</h2>
         <select value={filterOwner} onChange={e=>setFilterOwner(e.target.value)} style={{...inputStyle,width:160}}><option value="">All Owners</option>{owners.map(o=><option key={o} value={o}>{o}</option>)}</select>
@@ -392,7 +442,7 @@ function ActionLog({ actions, setActions, risks }) {
               <td style={tdStyle}><PriBadge p={a.priority}/></td>
               <td style={tdStyle}><StatusBadge status={a.status}/></td>
               <td style={tdStyle}>{od&&<Badge color="#ef4444">OVERDUE</Badge>}</td>
-              <td style={tdStyle}><button onClick={()=>setEditing(a)} style={btnSmall}>Edit</button></td>
+              <td style={tdStyle}><div style={{display:"flex",gap:6}}><button onClick={()=>setEditing(a)} style={btnSmall}>Edit</button><button onClick={()=>setConfirmDeleteAction(a)} style={{...btnSmall,background:"#ef444422",color:"#ef4444",border:"1px solid #ef444444"}}>🗑</button></div></td>
             </tr>
           );})}</tbody>
         </table>
@@ -808,7 +858,6 @@ export default function App() {
     {id:"rawreports",label:"📋 Raw Reports"},
     {id:"riskregister",label:"⚠ Risk Register"},
     {id:"actionlog",label:"✅ Action Log"},
-    {id:"integration",label:"🔗 MS Forms Setup"},
   ];
 
   return (
@@ -817,8 +866,7 @@ export default function App() {
       <div style={{background:"#0a0f1e",borderBottom:"1px solid #1e293b",padding:"0 24px"}}>
         <div style={{maxWidth:1280,margin:"0 auto",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div style={{padding:"16px 0"}}>
-            <div style={{fontSize:22,fontWeight:800,fontFamily:"'Bebas Neue',sans-serif",letterSpacing:2,color:"#38bdf8"}}>✈ LSA SAFETY MANAGEMENT SYSTEM</div>
-            <div style={{fontSize:11,color:"#334155",letterSpacing:1}}>LIGHT SPORT AVIATION · EGTK OXFORD</div>
+            <div style={{fontSize:22,fontWeight:800,fontFamily:"'Bebas Neue',sans-serif",letterSpacing:2,color:"#38bdf8"}}>✈ LS AIRMOTIVE SAFETY MANAGEMENT SYSTEM</div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <div style={{width:8,height:8,borderRadius:"50%",background:"#22c55e",boxShadow:"0 0 6px #22c55e"}}/>
@@ -840,7 +888,6 @@ export default function App() {
         {tab==="rawreports"&&<RawReports reports={reports} onRaise={raiseToRiskRegister} setReports={setReports}/>}
         {tab==="riskregister"&&<RiskRegister risks={risks} setRisks={setRisks} actions={actions} setActions={setActions} raiseTarget={raiseTarget} onRaiseSave={handleRaiseSave} onRaiseCancel={()=>setRaiseTarget(null)}/>}
         {tab==="actionlog"&&<ActionLog actions={actions} setActions={setActions} risks={risks}/>}
-        {tab==="integration"&&<><IntegrationGuide webhookSecret={webhookSecret} onSecretChange={handleSecretChange}/><SimulateWebhook webhookSecret={webhookSecret} onIncoming={addReport}/></>}
       </div>
     </div>
   );
