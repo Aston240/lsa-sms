@@ -1,7 +1,9 @@
 import { createClient } from "redis";
 
 async function getClient() {
-  const client = createClient({ url: process.env.REDIS_URL });
+  const url = process.env.REDIS_URL;
+  console.log("REDIS_URL starts with:", url ? url.substring(0, 20) : "UNDEFINED");
+  const client = createClient({ url });
   await client.connect();
   return client;
 }
@@ -12,12 +14,13 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const key = searchParams.get("key");
     if (!key) return Response.json({ error: "No key" }, { status: 400 });
+    const url = process.env.REDIS_URL;
+    if (!url) return Response.json({ error: "REDIS_URL not set" }, { status: 500 });
     redis = await getClient();
     const raw = await redis.get(key);
     return Response.json({ value: raw ? JSON.parse(raw) : null });
   } catch (err) {
-    console.error("GET error:", err);
-    return Response.json({ error: "Server error", detail: err.message }, { status: 500 });
+    return Response.json({ error: "Server error", detail: err.message, url_defined: !!process.env.REDIS_URL }, { status: 500 });
   } finally {
     if (redis) await redis.disconnect();
   }
@@ -32,8 +35,7 @@ export async function POST(req) {
     await redis.set(key, JSON.stringify(value));
     return Response.json({ ok: true });
   } catch (err) {
-    console.error("POST error:", err);
-    return Response.json({ error: "Server error", detail: err.message }, { status: 500 });
+    return Response.json({ error: "Server error", detail: err.message, url_defined: !!process.env.REDIS_URL }, { status: 500 });
   } finally {
     if (redis) await redis.disconnect();
   }
