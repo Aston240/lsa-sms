@@ -1,62 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
 
-// ── seed data ─────────────────────────────────────────────────────────────────
-const SEED_REPORTS = [
-  { id: 1, submittedAt: "2025-12-16T13:51:50", incidentDate: "2025-12-10", title: "Comms failure", location: "5 miles North of Beckley Mast", aircraft: "G-EGTB", picType: "Instructor", operationalArea: "PPL Training", what: "On frequency change to OX Radar 125.090 initial contact was made, shortly after radio became intermittent, comm was lost around 5 miles north of Beckly Mast. Box 2 selected and receive only was able, extra troubleshooting unsuccessful, sqwark ident requested, orbit undertaken and instructed to maintain 4520 SQ, approach commenced and voice clearance to land, Green from the tower was not visual. Debriefed in the tower with controller and the playback for training purposes.", reporterDetails: "Rob Norris", source: "excel" },
-  { id: 2, submittedAt: "2026-01-05T18:04:10", incidentDate: "2026-01-05", title: "Mags left on.", location: "Grass parking", aircraft: "N150PK", picType: "Instructor", operationalArea: "PPL Training", what: "Keys left in with mags on after flight.", reporterDetails: "Boothby", source: "excel" },
-  { id: 3, submittedAt: "2026-01-15T14:30:51", incidentDate: "2026-01-14", title: "G-BOTN Transmitter Failure", location: "Within 10 nm radius of EGTK northbound", aircraft: "G-BOTN", picType: "Licence Holder", operationalArea: "Aircraft Operations", what: "This incident happened during a EGTK-EGFE round trip flight. After take-off from EGTK, Oxford radar informed me my readability was 2. Upon arrival overhead Moreton-in-Marsh, Oxford radar failed to receive any of my transmissions. Oxford radar and I resorted to communicate with speechless code.", reporterDetails: "Anonymous", source: "excel" },
-  { id: 4, submittedAt: "2026-01-16T09:52:50", incidentDate: "2026-01-12", title: "Tie downs in the grass", location: "Grass parking", aircraft: "G-EGTB", picType: "Instructor", operationalArea: "PPL Training", what: "No incident, just tie downs left attached to ground pins.", reporterDetails: "", source: "excel" },
-  { id: 5, submittedAt: "2026-01-26T13:35:51", incidentDate: "2026-01-26", title: "G-FIAT Weight and Balance Error", location: "Aircraft Documents", aircraft: "G-FIAT", picType: "Other", operationalArea: "", what: "Weight and balance calculation error.", reporterDetails: "", source: "excel" },
-  { id: 6, submittedAt: "2026-02-02T16:44:01", incidentDate: "2026-02-02", title: "Front left cowling retention clip tabs not engaged", location: "Grass parking EGTK", aircraft: "G-BTGO", picType: "Other", operationalArea: "", what: "During initial walk-around before flight, it was discovered that the left front retaining clip for the engine cowling was not engaged with the tab, but the dzus fastener was engaged.", reporterDetails: "Daniel Smith & Brien Nelson", source: "excel" },
-  { id: 7, submittedAt: "2026-02-04T17:51:22", incidentDate: "2026-02-04", title: "ATC attitude to solo student", location: "School line EGTK", aircraft: "GMKAS", picType: "Solo Student", operationalArea: "", what: "Solo student call for taxi after instructor left aircraft. ATC questioned purpose of flight, student responded, for circuits. ATC then had a go at student for not booking out as solo circuits and left the student feeling uncomfortable before second solo.", reporterDetails: "Brien Nelson", source: "excel" },
-  { id: 8, submittedAt: "2026-02-04T17:59:07", incidentDate: "2026-01-29", title: "Strobe lights on taxi", location: "EGTK", aircraft: "GBOTN", picType: "Instructor", operationalArea: "", what: "Strobe lights are on with the beacon and no means of separation.", reporterDetails: "", source: "excel" },
-  { id: 9, submittedAt: "2026-02-04T18:02:01", incidentDate: "2026-02-04", title: "Crew walking out in front of aircraft on apron", location: "EGTK apron north end", aircraft: "Other", picType: "Instructor", operationalArea: "", what: "Taxi on to apron from bravo taxiway, in the dark, crew from jet appeared in front with no intention of stopping, looking ahead and not acknowledging that he had seen us. Reflectors only work in direct light!!", reporterDetails: "", source: "excel" },
-  { id: 10, submittedAt: "2026-02-06T08:39:57", incidentDate: "2026-02-04", title: "Incorrect frequency step on Garmin G430", location: "Oxford", aircraft: "G-BOTN", picType: "Instructor", operationalArea: "", what: "On start it was observed that the frequency spacing displayed was not 8.33, but ATIS and Tower were received strength 5. On transfer to radar aircraft was unreadable and we returned to tower and landed to rectify.", reporterDetails: "Donough Wilson", source: "excel" },
-  { id: 11, submittedAt: "2026-02-10T10:26:34", incidentDate: "2026-02-09", title: "Alternator failure", location: "Overhead Charlbury", aircraft: "GMKAS", picType: "Instructor", operationalArea: "", what: "LV warning light illuminated just prior to starting a navigation exercise. Ammeter showed 0 charge. The alternator was turned off at the switch with any unnecessary electrical circuits disabled. Still showing no sign of charge. Reported issue to air traffic and recovered to EGTK. On base leg, having rejoined the circuit, the system spontaneously came back to life.", reporterDetails: "Dan Griffiths", source: "excel" },
-  { id: 12, submittedAt: "2026-02-10T14:19:10", incidentDate: "2026-02-09", title: "Flight with pilot under 100 hours.", location: "EGTK", aircraft: "N150PK", picType: "Licence Holder", operationalArea: "", what: "Jake Painton was waiting for the crosswind to reduce to 12 knots. It was 13 and as I have the hours to use the aircraft's full crosswind limit, I offered to go with him. In hindsight, shouldn't have offered to go due to the PIC potentially having to be in command out of his club hour limits.", reporterDetails: "Joe Tomlin", source: "excel" },
-  { id: 13, submittedAt: "2026-02-12T08:59:17", incidentDate: "2026-02-11", title: "Full flap failed to retract on G/A", location: "EGTB", aircraft: "G-ENLI", picType: "Instructor", operationalArea: "", what: "Practising Circuits. On short final selected full flap. Good landing, retracted flap to Take off position and applied full power. Aircraft took off and initial climb was sluggish. Instructor asked student to level off at 500ft and retracted flaps fully. Once landed and taxing checked flaps again and all positions worked as they should.", reporterDetails: "Tom Newell", source: "excel" },
-  { id: 14, submittedAt: "2026-02-24T09:30:48", incidentDate: "2026-02-24", title: "Bald spot MKAS report", location: "EGTK", aircraft: "MKAS", picType: "Other", operationalArea: "", what: "Engineering report of bald spot on tyre. Will need to monitor brakes on landings.", reporterDetails: "", source: "excel" },
-  { id: 15, submittedAt: "2026-02-26T09:56:17", incidentDate: "2026-02-25", title: "Aircraft bust through the circuit", location: "EGTK circuit", aircraft: "G-BTGO", picType: "Instructor", operationalArea: "", what: "Whilst in the orbit, late down wind, ATC asked us to get a visual with a PA28 that was going straight through the circuit at 1500 feet. The aircraft was located visually and the instructor took control of the aircraft to tighten up and avoid any conflict. ATC were trying to get hold of the aircraft on the radio but unsuccessfully.", reporterDetails: "Dan Griffiths", source: "excel" },
-  { id: 16, submittedAt: "2026-03-01T09:55:05", incidentDate: "2026-02-28", title: "test line", location: "EGTK", aircraft: "GBTGO", picType: "Instructor", operationalArea: "", what: "Test report. Nothing happened.", reporterDetails: "Tom Newell", source: "excel" },
-];
-
-const SEED_RISKS = [
-  { id: "LS-SMS-001", reportId: 1, dateIdentified: "2025-12-10", aircraft: "G-EGTB", picType: "Instructor", location: "5 miles North of Beckley Mast", operationalArea: "PPL Training", hazardDescription: "Comms failure\n\nOn frequency change to OX Radar 125.090 initial contact was made, shortly after radio became intermittent.", potentialConsequence: "Loss of communications", hazardCategory: "Aircraft & Technical", initSeverity: 1, initLikelihood: 2, existingControls: "Standard lost comms procedure", additionalMitigation: "none", actionOwner: "Tom Newell", targetDate: "", status: "Closed", dateImplemented: "2026-03-01", residualSeverity: 1, residualLikelihood: 2, monitoringMethod: "Will watch for it happening again on this aircraft" },
-  { id: "LS-SMS-002", reportId: 2, dateIdentified: "2026-01-05", aircraft: "N150PK", picType: "Instructor", location: "Grass parking", operationalArea: "PPL Training", hazardDescription: "Mags left on.\n\nKeys left in with mags on after flight.", potentialConsequence: "Serious injury", hazardCategory: "Training & Supervision", initSeverity: 1, initLikelihood: 2, existingControls: "Standard aircraft checklist", additionalMitigation: "none", actionOwner: "Tom Newell", targetDate: "", status: "Closed", dateImplemented: "2026-03-01", residualSeverity: 1, residualLikelihood: 2, monitoringMethod: "Will watch for it happening again" },
-  { id: "LS-SMS-003", reportId: 3, dateIdentified: "2026-01-14", aircraft: "G-BOTN", picType: "Licence Holder", location: "Within 10 nm radius of EGTK northbound", operationalArea: "Aircraft Operations", hazardDescription: "G-BOTN Transmitter Failure", potentialConsequence: "Loss of communications", hazardCategory: "Aircraft & Technical", initSeverity: 2, initLikelihood: 2, existingControls: "Standard lost comms procedure", additionalMitigation: "none", actionOwner: "Tom Newell", targetDate: "2026-02-28", status: "Mitigation In Progress", dateImplemented: "", residualSeverity: null, residualLikelihood: null, monitoringMethod: "" },
-  { id: "LS-SMS-004", reportId: 4, dateIdentified: "2026-01-12", aircraft: "G-EGTB", picType: "Instructor", location: "Grass parking", operationalArea: "PPL Training", hazardDescription: "Tie downs in the grass\n\nNo incident, just tie downs left attached to ground pins.", potentialConsequence: "Minor aircraft damage", hazardCategory: "Human Factors", initSeverity: 3, initLikelihood: 2, existingControls: "SOP - asking members and instructors to tidy tie downs away.", additionalMitigation: "Safety Notice", actionOwner: "Joe Tomlin", targetDate: "2026-02-28", status: "Mitigation In Progress", dateImplemented: "", residualSeverity: null, residualLikelihood: null, monitoringMethod: "" },
-  { id: "LS-SMS-005", reportId: 5, dateIdentified: "2026-01-26", aircraft: "G-FIAT", picType: "Other", location: "Aircraft Documents", operationalArea: "", hazardDescription: "G-FIAT Weight and Balance Error\n\nWeight and balance calculation error.", potentialConsequence: "Serious aircraft damage / hull loss", hazardCategory: "Flight Operations – Ground", initSeverity: 1, initLikelihood: 1, existingControls: "Skydemon and paper W&B calculations must be done before each flight", additionalMitigation: "none", actionOwner: "Joe Tomlin", targetDate: "", status: "Monitoring", dateImplemented: "", residualSeverity: null, residualLikelihood: null, monitoringMethod: "" },
-  { id: "LS-SMS-006", reportId: 6, dateIdentified: "2026-02-02", aircraft: "G-BTGO", picType: "Other", location: "Grass parking EGTK", operationalArea: "", hazardDescription: "Front left cowling retention clip tabs not engaged, discovered during walk-around.", potentialConsequence: "Minor aircraft damage", hazardCategory: "Flight Operations – Airborne", initSeverity: 1, initLikelihood: 3, existingControls: "Instructors to complete walkaround as PIC", additionalMitigation: "", actionOwner: "Tom Newell", targetDate: "", status: "Closed", dateImplemented: "", residualSeverity: null, residualLikelihood: null, monitoringMethod: "" },
-  { id: "LS-SMS-007", reportId: 7, dateIdentified: "2026-02-04", aircraft: "GMKAS", picType: "Solo Student", location: "School line EGTK", operationalArea: "", hazardDescription: "ATC attitude to solo student\n\nSolo student left feeling uncomfortable before second solo.", potentialConsequence: "Reputational damage", hazardCategory: "Flight Operations – Airborne", initSeverity: 3, initLikelihood: 2, existingControls: "Student callsign", additionalMitigation: "", actionOwner: "Tom Newell", targetDate: "", status: "Monitoring", dateImplemented: "", residualSeverity: null, residualLikelihood: null, monitoringMethod: "" },
-  { id: "LS-SMS-008", reportId: 8, dateIdentified: "2026-01-29", aircraft: "GBOTN", picType: "Instructor", location: "EGTK", operationalArea: "", hazardDescription: "Strobe lights on taxi\n\nStrobe lights are on with the beacon and no means of separation.", potentialConsequence: "Regulatory non-compliance", hazardCategory: "Aircraft & Technical", initSeverity: 1, initLikelihood: 1, existingControls: "Lights tied to one switch", additionalMitigation: "none", actionOwner: "Tom Newell", targetDate: "", status: "Closed", dateImplemented: "", residualSeverity: null, residualLikelihood: null, monitoringMethod: "" },
-  { id: "LS-SMS-009", reportId: 9, dateIdentified: "2026-02-04", aircraft: "Other", picType: "Instructor", location: "EGTK apron north end", operationalArea: "", hazardDescription: "Crew walking out in front of aircraft on apron\n\nIn the dark, crew from jet appeared in front with no intention of stopping.", potentialConsequence: "Serious injury", hazardCategory: "Human Factors", initSeverity: 3, initLikelihood: 1, existingControls: "High Viz, eyes", additionalMitigation: "", actionOwner: "Joe Tomlin", targetDate: "", status: "Monitoring", dateImplemented: "", residualSeverity: null, residualLikelihood: null, monitoringMethod: "" },
-  { id: "LS-SMS-010", reportId: 10, dateIdentified: "2026-02-04", aircraft: "G-BOTN", picType: "Instructor", location: "Oxford", operationalArea: "", hazardDescription: "Incorrect frequency step on Garmin G430\n\nFrequency spacing displayed was not 8.33, aircraft was unreadable on transfer to radar.", potentialConsequence: "Loss of communications", hazardCategory: "Flight Operations – Airborne", initSeverity: 2, initLikelihood: 2, existingControls: "Pre taxi checks and RT checks", additionalMitigation: "", actionOwner: "Joe Tomlin", targetDate: "", status: "Monitoring", dateImplemented: "", residualSeverity: null, residualLikelihood: null, monitoringMethod: "" },
-  { id: "LS-SMS-011", reportId: 11, dateIdentified: "2026-02-09", aircraft: "GMKAS", picType: "Instructor", location: "Overhead Charlbury", operationalArea: "", hazardDescription: "Alternator failure\n\nLV warning light illuminated, ammeter showed 0 charge. System spontaneously came back to life on base leg.", potentialConsequence: "Loss of communications", hazardCategory: "Aircraft & Technical", initSeverity: 3, initLikelihood: 1, existingControls: "FREDA checks and emergency procedures", additionalMitigation: "", actionOwner: "Liam Salt", targetDate: "", status: "Monitoring", dateImplemented: "", residualSeverity: null, residualLikelihood: null, monitoringMethod: "" },
-  { id: "LS-SMS-012", reportId: 12, dateIdentified: "2026-02-09", aircraft: "N150PK", picType: "Licence Holder", location: "EGTK", operationalArea: "", hazardDescription: "Flight with pilot under 100 hours.\n\nOffered to go with pilot operating outside his club hour limits.", potentialConsequence: "Significant aircraft damage", hazardCategory: "Training & Supervision", initSeverity: 4, initLikelihood: 2, existingControls: "Club Minima and FOB", additionalMitigation: "", actionOwner: "Joe Tomlin", targetDate: "", status: "Monitoring", dateImplemented: "", residualSeverity: null, residualLikelihood: null, monitoringMethod: "" },
-  { id: "LS-SMS-013", reportId: 13, dateIdentified: "2026-02-11", aircraft: "G-ENLI", picType: "Instructor", location: "EGTB", operationalArea: "", hazardDescription: "Full flap failed to retract on G/A\n\nPractising Circuits. Initial climb was sluggish after go-around with full flap.", potentialConsequence: "CFIT / terrain conflict", hazardCategory: "Flight Operations – Airborne", initSeverity: 5, initLikelihood: 2, existingControls: "Recalculated performance & T/O flap only for landing in case of G/A", additionalMitigation: "", actionOwner: "Tom Newell", targetDate: "", status: "Monitoring", dateImplemented: "", residualSeverity: null, residualLikelihood: null, monitoringMethod: "" },
-  { id: "LS-SMS-014", reportId: 14, dateIdentified: "2026-02-24", aircraft: "MKAS", picType: "Other", location: "EGTK", operationalArea: "", hazardDescription: "Bald spot MKAS report\n\nEngineering report of bald spot on tyre.", potentialConsequence: "Minor aircraft damage", hazardCategory: "Flight Operations – Ground", initSeverity: 2, initLikelihood: 3, existingControls: "Heels on floor before landing", additionalMitigation: "Instructors reminded at meeting", actionOwner: "Tom Newell", targetDate: "", status: "Monitoring", dateImplemented: "", residualSeverity: null, residualLikelihood: null, monitoringMethod: "" },
-  { id: "LS-SMS-015", reportId: 15, dateIdentified: "2026-02-25", aircraft: "G-BTGO", picType: "Instructor", location: "EGTK circuit", operationalArea: "", hazardDescription: "Aircraft bust through the circuit\n\nPA28 went straight through the circuit at 1500 feet. Instructor took control to avoid conflict.", potentialConsequence: "Airspace infringement", hazardCategory: "Flight Operations – Airborne", initSeverity: 2, initLikelihood: 1, existingControls: "Standard ways to leave the circuit", additionalMitigation: "", actionOwner: "Tom Newell", targetDate: "", status: "Monitoring", dateImplemented: "", residualSeverity: null, residualLikelihood: null, monitoringMethod: "" },
-  { id: "LS-SMS-016", reportId: 16, dateIdentified: "2026-02-28", aircraft: "GBTGO", picType: "Instructor", location: "EGTK", operationalArea: "", hazardDescription: "test line\n\nTest report. Nothing happened.", potentialConsequence: "Reputational damage", hazardCategory: "Organisational / Administrative", initSeverity: 1, initLikelihood: 1, existingControls: "", additionalMitigation: "", actionOwner: "Tam Abrahams", targetDate: "", status: "Monitoring", dateImplemented: "", residualSeverity: null, residualLikelihood: null, monitoringMethod: "" },
-];
-
-const SEED_ACTIONS = [
-  { id: "ACT-001", hazardId: "LS-SMS-001", description: "Review hazard and define mitigation / closure evidence", owner: "Tom Newell", targetDate: "2026-02-28", priority: "LOW", status: "Closed", evidence: "Not able to replicate issue again. No one else reported issues. Will wait.", closedDate: "2026-02-28" },
-  { id: "ACT-002", hazardId: "LS-SMS-002", description: "Review hazard and define mitigation / closure evidence", owner: "Tom Newell", targetDate: "2026-02-28", priority: "LOW", status: "Closed", evidence: "No recollection from instructor. Will monitor. Normal checks should prevent in future.", closedDate: "2026-02-28" },
-  { id: "ACT-003", hazardId: "LS-SMS-004", description: "Review hazard and define mitigation / closure evidence", owner: "Joe Tomlin", targetDate: "2026-02-28", priority: "MEDIUM", status: "Open", evidence: "", closedDate: "" },
-  { id: "ACT-004", hazardId: "LS-SMS-003", description: "Review hazard and define mitigation / closure evidence", owner: "Tom Newell", targetDate: "2026-02-28", priority: "HIGH", status: "Open", evidence: "", closedDate: "" },
-  { id: "ACT-005", hazardId: "LS-SMS-005", description: "Review hazard and define mitigation / closure evidence", owner: "Joe Tomlin", targetDate: "2026-03-15", priority: "LOW", status: "In Progress", evidence: "", closedDate: "" },
-  { id: "ACT-006", hazardId: "LS-SMS-008", description: "Review hazard and define mitigation / closure evidence", owner: "Tom Newell", targetDate: "2026-03-01", priority: "LOW", status: "Closed", evidence: "Lights tied to one switch. Won't be changed. Recommend use beacon as normal.", closedDate: "2026-03-01" },
-  { id: "ACT-007", hazardId: "LS-SMS-006", description: "Review hazard and define mitigation / closure evidence", owner: "Tom Newell", targetDate: "2026-02-27", priority: "MEDIUM", status: "Closed", evidence: "Instructors reminded during meeting on 27th Feb that they are responsible as P1.", closedDate: "2026-03-01" },
-  { id: "ACT-008", hazardId: "LS-SMS-007", description: "Review hazard and define mitigation / closure evidence", owner: "Tom Newell", targetDate: "2026-03-15", priority: "MEDIUM", status: "In Progress", evidence: "", closedDate: "" },
-  { id: "ACT-009", hazardId: "LS-SMS-009", description: "Review hazard and define mitigation / closure evidence", owner: "Joe Tomlin", targetDate: "2026-03-15", priority: "LOW", status: "In Progress", evidence: "", closedDate: "" },
-  { id: "ACT-010", hazardId: "LS-SMS-010", description: "Review hazard and define mitigation / closure evidence", owner: "Joe Tomlin", targetDate: "2026-03-15", priority: "LOW", status: "In Progress", evidence: "", closedDate: "" },
-  { id: "ACT-011", hazardId: "LS-SMS-011", description: "Review hazard and define mitigation / closure evidence", owner: "Liam Salt", targetDate: "2026-03-15", priority: "LOW", status: "In Progress", evidence: "", closedDate: "" },
-  { id: "ACT-012", hazardId: "LS-SMS-012", description: "Review hazard and define mitigation / closure evidence", owner: "Joe Tomlin", targetDate: "2026-03-15", priority: "MEDIUM", status: "In Progress", evidence: "", closedDate: "" },
-  { id: "ACT-013", hazardId: "LS-SMS-013", description: "Review hazard and define mitigation / closure evidence", owner: "Tom Newell", targetDate: "2026-03-15", priority: "MEDIUM", status: "In Progress", evidence: "", closedDate: "" },
-  { id: "ACT-014", hazardId: "LS-SMS-014", description: "Review hazard and define mitigation / closure evidence", owner: "Tom Newell", targetDate: "2026-03-15", priority: "LOW", status: "In Progress", evidence: "", closedDate: "" },
-  { id: "ACT-015", hazardId: "LS-SMS-015", description: "Review hazard and define mitigation / closure evidence", owner: "Tom Newell", targetDate: "2026-03-15", priority: "LOW", status: "In Progress", evidence: "", closedDate: "" },
-  { id: "ACT-016", hazardId: "LS-SMS-016", description: "Review hazard and define mitigation / closure evidence", owner: "Tam Abrahams", targetDate: "2026-03-15", priority: "LOW", status: "In Progress", evidence: "", closedDate: "" },
-];
+// ── seed data (empty – data lives in Redis) ──────────────────────────────────
+const SEED_REPORTS = [];
+const SEED_RISKS = [];
+const SEED_ACTIONS = [];
 
 const ACTION_OWNERS = ["Tom Newell", "Tam Abrahams", "Joe Tomlin", "Liam Salt", "An Instructor"];
 const HAZARD_CATEGORIES = ["Flight Operations – Airborne", "Flight Operations – Ground", "Aircraft & Technical", "Training & Supervision", "Human Factors", "Organisational / Administrative"];
@@ -106,7 +53,7 @@ const Badge = ({ children, color }) => (
   <span style={{ background: color + "22", color, border: `1px solid ${color}44`, borderRadius: 4, padding: "2px 8px", fontSize: 11, fontWeight: 700, letterSpacing: ".5px", whiteSpace: "nowrap" }}>{children}</span>
 );
 const RiskBadge = ({ s, l }) => { const score = riskScore(s, l); const { label, color } = riskLevel(score); return <Badge color={color}>{score} – {label}</Badge>; };
-const StatusBadge = ({ status }) => { const m = { "Open":"#ef4444","Under Review":"#f59e0b","Mitigation In Progress":"#f59e0b","Monitoring":"#38bdf8","Closed":"#22c55e","In Progress":"#f59e0b" }; return <Badge color={m[status]||"#64748b"}>{status}</Badge>; };
+const StatusBadge = ({ status }) => { const m = { "Open":"#ef4444","Under Review":"#f59e0b","Mitigation In Progress":"#f59e0b","Monitoring":"#f59e0b","Closed":"#22c55e","In Progress":"#f59e0b" }; return <Badge color={m[status]||"#64748b"}>{status}</Badge>; };
 const PriBadge = ({ p }) => { const m = { HIGH:"#ef4444", MEDIUM:"#f59e0b", LOW:"#22c55e" }; return <Badge color={m[p]||"#64748b"}>{p}</Badge>; };
 const Input = ({ label, value, onChange, type="text", options, required, rows }) => (
   <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
@@ -221,7 +168,7 @@ function SubmitReport({ onSubmit }) {
 }
 
 // ── Raw Reports ───────────────────────────────────────────────────────────────
-function RawReports({ reports }) {
+function RawReports({ reports, onRaise, setReports }) {
   const [search, setSearch] = useState("");
   const filtered = reports.filter(r=>r.title.toLowerCase().includes(search.toLowerCase())||r.aircraft.toLowerCase().includes(search.toLowerCase()));
   return (
@@ -232,17 +179,25 @@ function RawReports({ reports }) {
       </div>
       <div style={{overflowX:"auto"}}>
         <table style={tableStyle}>
-          <thead><tr>{["ID","Source","Date","Title","Aircraft","Location","PIC Type","Reporter"].map(h=><th key={h} style={thStyle}>{h}</th>)}</tr></thead>
+          <thead><tr>{["ID","Source","Date","Title","Aircraft","Location","PIC Type","Reporter","Status",""].map(h=><th key={h} style={thStyle}>{h}</th>)}</tr></thead>
           <tbody>{filtered.map(r=>(
             <tr key={r.id}>
               <td style={tdStyle}>{r.id}</td>
-              <td style={tdStyle}>{r.source==="forms"?<Badge color="#818cf8">MS Forms</Badge>:r.source==="manual"?<Badge color="#38bdf8">Manual</Badge>:<Badge color="#475569">Excel</Badge>}</td>
+              <td style={tdStyle}>{r.source==="forms"?<Badge color="#818cf8">MS Forms</Badge>:r.source==="manual"?<Badge color="#38bdf8">Manual</Badge>:r.source==="excel-import"?<Badge color="#38bdf8">Import</Badge>:<Badge color="#475569">Excel</Badge>}</td>
               <td style={tdStyle}>{fmt(r.incidentDate)}</td>
-              <td style={{...tdStyle,maxWidth:260}}>{r.title}</td>
+              <td style={{...tdStyle,maxWidth:220}}>{r.title}</td>
               <td style={tdStyle}>{r.aircraft}</td>
               <td style={tdStyle}>{r.location}</td>
               <td style={tdStyle}>{r.picType}</td>
               <td style={tdStyle}>{r.reporterDetails||<span style={{color:"#475569"}}>Anonymous</span>}</td>
+              <td style={tdStyle}>{r.acknowledged ? <Badge color="#22c55e">✓ Acknowledged</Badge> : <Badge color="#f59e0b">Pending Review</Badge>}</td>
+              <td style={tdStyle}>
+                {!r.acknowledged && (
+                  <button onClick={()=>onRaise(r)} style={{...btnSmall,background:"#0ea5e933",color:"#38bdf8",border:"1px solid #0ea5e955"}}>
+                    ↗ Raise to Risk Register
+                  </button>
+                )}
+              </td>
             </tr>
           ))}</tbody>
         </table>
@@ -252,13 +207,62 @@ function RawReports({ reports }) {
 }
 
 // ── Risk Register ─────────────────────────────────────────────────────────────
-function RiskRegister({ risks, setRisks, actions }) {
+function RiskRegister({ risks, setRisks, actions, setActions, raiseTarget, onRaiseSave, onRaiseCancel }) {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const filtered = risks.filter(r=>(!search||(r.id+r.hazardDescription+r.aircraft).toLowerCase().includes(search.toLowerCase()))&&(!filterStatus||r.status===filterStatus));
   const save = updated => { setRisks(prev=>prev.map(r=>r.id===updated.id?updated:r)); setEditing(null); };
-  if (editing) return <RiskEditor risk={editing} onSave={save} onCancel={()=>setEditing(null)} />;
+  const addAction = newAction => {
+    setActions(prev => {
+      const nums = prev.map(a=>parseInt((a.id||"ACT-000").split("-")[1]||0));
+      const nextId = "ACT-" + String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3,"0");
+      return [...prev, {...newAction, id: nextId}];
+    });
+  };
+
+  // Show pre-filled new risk form when raising from a report
+  if (raiseTarget) {
+    const prefilled = {
+      id: "NEW",
+      reportId: raiseTarget.id,
+      dateIdentified: raiseTarget.incidentDate || new Date().toISOString().slice(0,10),
+      aircraft: raiseTarget.aircraft || "",
+      picType: raiseTarget.picType || "",
+      location: raiseTarget.location || "",
+      operationalArea: raiseTarget.operationalArea || "",
+      hazardDescription: raiseTarget.title + (raiseTarget.what ? "
+
+" + raiseTarget.what : ""),
+      potentialConsequence: "",
+      hazardCategory: "",
+      initSeverity: 1,
+      initLikelihood: 1,
+      existingControls: "",
+      additionalMitigation: "",
+      actionOwner: "",
+      targetDate: "",
+      status: "Open",
+      dateImplemented: "",
+      residualSeverity: null,
+      residualLikelihood: null,
+      monitoringMethod: "",
+    };
+    return (
+      <div>
+        <div style={{background:"#0f172a",border:"1px solid #0ea5e955",borderRadius:8,padding:"12px 16px",marginBottom:16,display:"flex",gap:12,alignItems:"center"}}>
+          <span style={{fontSize:18}}>✈</span>
+          <div>
+            <div style={{fontSize:13,fontWeight:700,color:"#38bdf8"}}>Raising Report #{raiseTarget.id} to Risk Register</div>
+            <div style={{fontSize:12,color:"#64748b"}}>{raiseTarget.title} · {raiseTarget.aircraft}</div>
+          </div>
+        </div>
+        <RiskEditor risk={prefilled} onSave={onRaiseSave} onCancel={onRaiseCancel} onAddAction={addAction} isNew />
+      </div>
+    );
+  }
+
+  if (editing) return <RiskEditor risk={editing} onSave={save} onCancel={()=>setEditing(null)} onAddAction={addAction} />;
   return (
     <div>
       <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:16,flexWrap:"wrap"}}>
@@ -293,13 +297,16 @@ function RiskRegister({ risks, setRisks, actions }) {
   );
 }
 
-function RiskEditor({ risk, onSave, onCancel }) {
+function RiskEditor({ risk, onSave, onCancel, isNew, onAddAction }) {
   const [form, setForm] = useState({...risk});
+  const [showActionForm, setShowActionForm] = useState(false);
+  const [actionForm, setActionForm] = useState({ description:"", owner: risk.actionOwner||"", targetDate:"", priority:"MEDIUM", status:"Open" });
   const set = k => v => setForm(f=>({...f,[k]:v}));
+  const setAct = k => v => setActionForm(f=>({...f,[k]:v}));
   return (
     <div style={{maxWidth:780}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-        <h2 style={h2Style}>Edit Risk – {form.id}</h2>
+        <h2 style={h2Style}>{isNew ? "New Risk Entry" : "Edit Risk – " + form.id}</h2>
         <button onClick={onCancel} style={btnSecondary}>Cancel</button>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
@@ -328,7 +335,30 @@ function RiskEditor({ risk, onSave, onCancel }) {
       </div>
       {form.residualSeverity&&form.residualLikelihood&&<div style={{margin:"12px 0",display:"flex",alignItems:"center",gap:12}}><span style={{color:"#64748b",fontSize:12}}>Residual Risk Score:</span><RiskBadge s={form.residualSeverity} l={form.residualLikelihood} /></div>}
       <div style={{marginTop:14}}><Input label="Monitoring Method" value={form.monitoringMethod} onChange={set("monitoringMethod")} rows={2} /></div>
-      <button onClick={()=>onSave(form)} style={{...btnPrimary,marginTop:18}}>Save Changes</button>
+      <button onClick={()=>onSave(form)} style={{...btnPrimary,marginTop:18}}>{isNew ? "✓ Save to Risk Register" : "Save Changes"}</button>
+
+      {!isNew && (
+        <div style={{marginTop:24,padding:16,background:"#0f172a",border:"1px solid #1e293b",borderRadius:8}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontSize:12,fontWeight:700,color:"#475569",letterSpacing:"1px",textTransform:"uppercase"}}>Actions for this Risk</span>
+            <button onClick={()=>setShowActionForm(v=>!v)} style={{...btnSmall,background:"#7c3aed22",color:"#a78bfa",border:"1px solid #7c3aed44"}}>
+              {showActionForm ? "✕ Cancel" : "＋ Create Action"}
+            </button>
+          </div>
+          {showActionForm && (
+            <div style={{marginTop:14,display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <div style={{gridColumn:"1/-1"}}><Input label="Action Description" value={actionForm.description} onChange={setAct("description")} rows={2} /></div>
+              <Input label="Action Owner" value={actionForm.owner} onChange={setAct("owner")} options={["", ...ACTION_OWNERS]} />
+              <Input label="Target Date" value={actionForm.targetDate} onChange={setAct("targetDate")} type="date" />
+              <Input label="Priority" value={actionForm.priority} onChange={setAct("priority")} options={["LOW","MEDIUM","HIGH"]} />
+              <Input label="Status" value={actionForm.status} onChange={setAct("status")} options={["Open","In Progress","Closed"]} />
+              <div style={{gridColumn:"1/-1"}}>
+                <button onClick={()=>{ onAddAction({...actionForm, hazardId: form.id}); setActionForm({description:"",owner:form.actionOwner||"",targetDate:"",priority:"MEDIUM",status:"Open"}); setShowActionForm(false); }} style={{...btnPrimary,background:"#7c3aed"}}>＋ Add Action</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -745,6 +775,22 @@ export default function App() {
 
   const handleSecretChange = (s) => { setWebhookSecret(s); };
 
+  const [raiseTarget, setRaiseTarget] = useState(null);
+
+  const raiseToRiskRegister = useCallback((report) => {
+    setRaiseTarget(report);
+    setTab("riskregister");
+  }, []);
+
+  const handleRaiseSave = useCallback((newRisk) => {
+    setRisks(prev => {
+      const nextId = "LS-SMS-" + String(Math.max(...prev.map(r => parseInt(r.id.split("-")[2]||0)), 0) + 1).padStart(3,"0");
+      return [...prev, { ...newRisk, id: nextId }];
+    });
+    setReports(prev => prev.map(r => r.id === raiseTarget.id ? { ...r, acknowledged: true } : r));
+    setRaiseTarget(null);
+  }, [raiseTarget]);
+
   const importReports = useCallback((newOnes) => {
     setReports(prev => {
       let nextId = Math.max(...prev.map(r => r.id), 0) + 1;
@@ -791,8 +837,8 @@ export default function App() {
         {tab==="dashboard"&&<Dashboard reports={reports} risks={risks} actions={actions}/>}
         {tab==="submit"&&<SubmitReport onSubmit={addReport}/>}
         {tab==="import"&&<ExcelImport reports={reports} onImport={importReports}/>}
-        {tab==="rawreports"&&<RawReports reports={reports}/>}
-        {tab==="riskregister"&&<RiskRegister risks={risks} setRisks={setRisks} actions={actions}/>}
+        {tab==="rawreports"&&<RawReports reports={reports} onRaise={raiseToRiskRegister} setReports={setReports}/>}
+        {tab==="riskregister"&&<RiskRegister risks={risks} setRisks={setRisks} actions={actions} setActions={setActions} raiseTarget={raiseTarget} onRaiseSave={handleRaiseSave} onRaiseCancel={()=>setRaiseTarget(null)}/>}
         {tab==="actionlog"&&<ActionLog actions={actions} setActions={setActions} risks={risks}/>}
         {tab==="integration"&&<><IntegrationGuide webhookSecret={webhookSecret} onSecretChange={handleSecretChange}/><SimulateWebhook webhookSecret={webhookSecret} onIncoming={addReport}/></>}
       </div>
