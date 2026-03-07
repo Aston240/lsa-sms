@@ -385,6 +385,175 @@ function ActionEditor({ action, risks, onSave, onCancel }) {
   );
 }
 
+// ── Excel Import ──────────────────────────────────────────────────────────────
+function ExcelImport({ reports, onImport }) {
+  const [status, setStatus] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [importing, setImporting] = useState(false);
+
+  const handleFile = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setStatus(null); setPreview(null);
+
+    try {
+      const { read, utils } = await import("https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs");
+      const buf = await file.arrayBuffer();
+      const wb = read(buf);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = utils.sheet_to_json(ws, { defval: "" });
+
+      if (!rows.length) { setStatus({ ok: false, msg: "No data found in file." }); return; }
+
+      // Detect MS Forms column names
+      const first = rows[0];
+      const keys = Object.keys(first);
+
+      // Map columns — try to auto-detect by fuzzy matching
+      const find = (...terms) => keys.find(k => terms.some(t => k.toLowerCase().includes(t.toLowerCase()))) || "";
+
+      const titleCol = find("title", "brief");
+      const dateCol = find("date of incident", "incident date", "date");
+      const locationCol = find("location", "where", "place");
+      const aircraftCol = find("aircraft", "reg");
+      const picCol = find("pic", "who was");
+      const whatCol = find("what happened", "factual", "what");
+      const reporterCol = find("reporter", "name", "contact", "details");
+      const submittedCol = find("start time", "submitted", "completion");
+
+      if (!titleCol && !whatCol) {
+        setStatus({ ok: false, msg: "Could not recognise this file format. Make sure it's a Microsoft Forms Excel export." });
+        return;
+      }
+
+      // Build candidate reports
+      const candidates = rows.map((row, i) => ({
+        _rowIndex: i,
+        submittedAt: submittedCol && row[submittedCol] ? new Date(row[submittedCol]).toISOString() : new Date().toISOString(),
+        incidentDate: dateCol && row[dateCol] ? formatExcelDate(row[dateCol]) : "",
+        title: titleCol ? String(row[titleCol] || "").trim() : "",
+        location: locationCol ? String(row[locationCol] || "").trim() : "",
+        aircraft: aircraftCol ? String(row[aircraftCol] || "").trim() : "",
+        picType: picCol ? String(row[picCol] || "").trim() : "",
+        operationalArea: "",
+        what: whatCol ? String(row[whatCol] || "").trim() : "",
+        reporterDetails: reporterCol ? String(row[reporterCol] || "").trim() : "",
+        source: "excel-import",
+      }));
+
+      // Deduplicate against existing reports
+      const existingKeys = new Set(reports.map(r => dedupeKey(r)));
+      const newOnes = candidates.filter(c => !existingKeys.has(dedupeKey(c)));
+      const dupes = candidates.length - newOnes.length;
+
+      setPreview({ candidates, newOnes, dupes, totalRows: rows.length });
+    } catch (err) {
+      setStatus({ ok: false, msg: "Error reading file: " + err.message });
+    }
+    e.target.value = "";
+  };
+
+  const dedupeKey = (r) => `${r.incidentDate}__${String(r.title || "").trim().toLowerCase().slice(0, 40)}`;
+
+  const formatExcelDate = (val) => {
+    if (!val) return "";
+    if (typeof val === "number") {
+      // Excel serial date
+      const d = new Date((val - 25569) * 86400 * 1000);
+      return d.toISOString().slice(0, 10);
+    }
+    try { return new Date(val).toISOString().slice(0, 10); } catch { return String(val); }
+  };
+
+  const confirmImport = () => {
+    if (!preview?.newOnes?.length) return;
+    setImporting(true);
+    onImport(preview.newOnes);
+    setStatus({ ok: true, msg: `✅ ${preview.newOnes.length} new report${preview.newOnes.length !== 1 ? "s" : ""} imported successfully. ${preview.dupes > 0 ? `${preview.dupes} duplicate${preview.dupes !== 1 ? "s" : ""} skipped.` : ""}` });
+    setPreview(null);
+    setImporting(false);
+  };
+
+  return (
+    <div style={{ maxWidth: 720 }}>
+      <h2 style={h2Style}>📥 Import from Microsoft Forms Excel</h2>
+      <p style={{ color: "#64748b", fontSize: 13, marginBottom: 24 }}>
+        Download your responses from Microsoft Forms as Excel, then drag the file here. The app will automatically skip any reports already in the system — so you can import as often as you like without creating duplicates.
+      </p>
+
+      <div style={{ background: "#0f172a", border: "2px dashed #334155", borderRadius: 10, padding: "32px 24px", textAlign: "center", marginBottom: 20 }}>
+        <div style={{ fontSize: 32, marginBottom: 8 }}>📂</div>
+        <div style={{ color: "#94a3b8", fontSize: 14, marginBottom: 16 }}>Drag your Excel file here or click to browse</div>
+        <label style={{ ...btnPrimary, cursor: "pointer", display: "inline-block" }}>
+          Choose Excel File
+          <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFile} style={{ display: "none" }} />
+        </label>
+      </div>
+
+      <div style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 10, padding: "16px 20px", marginBottom: 20 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", letterSpacing: "1px", textTransform: "uppercase", marginBottom: 10 }}>How to export from Microsoft Forms</div>
+        {[
+          "Go to forms.microsoft.com and open your safety report form",
+          'Click "Responses" at the top',
+          'Click the Excel icon or "Open in Excel" button',
+          "Save the downloaded file to your computer",
+          "Drag it into the box above",
+        ].map((s, i) => (
+          <div key={i} style={{ display: "flex", gap: 10, marginBottom: 6, fontSize: 13, color: "#94a3b8" }}>
+            <span style={{ color: "#38bdf8", fontWeight: 700, minWidth: 18 }}>{i + 1}.</span>
+            <span>{s}</span>
+          </div>
+        ))}
+      </div>
+
+      {status && (
+        <div style={{ background: status.ok ? "#14532d" : "#450a0a", border: `1px solid ${status.ok ? "#22c55e" : "#ef4444"}`, borderRadius: 8, padding: "12px 16px", marginBottom: 16, color: status.ok ? "#86efac" : "#fca5a5", fontSize: 13 }}>
+          {status.msg}
+        </div>
+      )}
+
+      {preview && (
+        <div style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 10, padding: "20px" }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", marginBottom: 12 }}>Preview</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
+            <div style={{ background: "#020617", borderRadius: 8, padding: "12px 16px", textAlign: "center" }}>
+              <div style={{ fontSize: 28, fontWeight: 800, color: "#38bdf8", fontFamily: "'Bebas Neue', sans-serif" }}>{preview.totalRows}</div>
+              <div style={{ fontSize: 11, color: "#64748b" }}>ROWS IN FILE</div>
+            </div>
+            <div style={{ background: "#020617", borderRadius: 8, padding: "12px 16px", textAlign: "center" }}>
+              <div style={{ fontSize: 28, fontWeight: 800, color: "#22c55e", fontFamily: "'Bebas Neue', sans-serif" }}>{preview.newOnes.length}</div>
+              <div style={{ fontSize: 11, color: "#64748b" }}>NEW TO IMPORT</div>
+            </div>
+            <div style={{ background: "#020617", borderRadius: 8, padding: "12px 16px", textAlign: "center" }}>
+              <div style={{ fontSize: 28, fontWeight: 800, color: "#f59e0b", fontFamily: "'Bebas Neue', sans-serif" }}>{preview.dupes}</div>
+              <div style={{ fontSize: 11, color: "#64748b" }}>DUPLICATES SKIPPED</div>
+            </div>
+          </div>
+
+          {preview.newOnes.length > 0 ? (
+            <>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>New reports to be added:</div>
+              <div style={{ maxHeight: 200, overflowY: "auto", marginBottom: 16 }}>
+                {preview.newOnes.map((r, i) => (
+                  <div key={i} style={{ borderLeft: "3px solid #22c55e", paddingLeft: 10, marginBottom: 8 }}>
+                    <div style={{ fontSize: 12, color: "#e2e8f0", fontWeight: 600 }}>{r.title || "Untitled"}</div>
+                    <div style={{ fontSize: 11, color: "#64748b" }}>{fmt(r.incidentDate)} · {r.aircraft || "No aircraft"}</div>
+                  </div>
+                ))}
+              </div>
+              <button onClick={confirmImport} disabled={importing} style={{ ...btnPrimary, background: "#22c55e" }}>
+                ✓ Import {preview.newOnes.length} New Report{preview.newOnes.length !== 1 ? "s" : ""}
+              </button>
+            </>
+          ) : (
+            <div style={{ color: "#f59e0b", fontSize: 13 }}>⚠ All {preview.totalRows} rows already exist in the system — nothing new to import.</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── MS Forms Integration Guide ────────────────────────────────────────────────
 function IntegrationGuide({ webhookSecret, onSecretChange }) {
   const [copied, setCopied] = useState(null);
@@ -568,9 +737,18 @@ export default function App() {
 
   if (!ready) return <div style={{minHeight:"100vh",background:"#020617",display:"flex",alignItems:"center",justifyContent:"center",color:"#38bdf8",fontFamily:"sans-serif"}}>Loading SMS data…</div>;
 
+  const importReports = useCallback((newOnes) => {
+    setReports(prev => {
+      let nextId = Math.max(...prev.map(r => r.id), 0) + 1;
+      const toAdd = newOnes.map(r => ({ ...r, id: nextId++, submittedAt: r.submittedAt || new Date().toISOString() }));
+      return [...prev, ...toAdd];
+    });
+  }, []);
+
   const tabs = [
     {id:"dashboard",label:"📊 Dashboard"},
     {id:"submit",label:"✈ Submit Report"},
+    {id:"import",label:"📥 Import from Forms"},
     {id:"rawreports",label:"📋 Raw Reports"},
     {id:"riskregister",label:"⚠ Risk Register"},
     {id:"actionlog",label:"✅ Action Log"},
@@ -602,6 +780,7 @@ export default function App() {
       <div style={{maxWidth:1280,margin:"0 auto",padding:"28px 24px"}}>
         {tab==="dashboard"&&<Dashboard reports={reports} risks={risks} actions={actions}/>}
         {tab==="submit"&&<SubmitReport onSubmit={addReport}/>}
+        {tab==="import"&&<ExcelImport reports={reports} onImport={importReports}/>}
         {tab==="rawreports"&&<RawReports reports={reports}/>}
         {tab==="riskregister"&&<RiskRegister risks={risks} setRisks={setRisks} actions={actions}/>}
         {tab==="actionlog"&&<ActionLog actions={actions} setActions={setActions} risks={risks}/>}
