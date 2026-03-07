@@ -738,8 +738,6 @@ export default function App() {
 
   const handleSecretChange = (s) => { setWebhookSecret(s); };
 
-  if (!ready) return <div style={{minHeight:"100vh",background:"#020617",display:"flex",alignItems:"center",justifyContent:"center",color:"#38bdf8",fontFamily:"sans-serif"}}>Loading SMS data…</div>;
-
   const importReports = useCallback((newOnes) => {
     setReports(prev => {
       let nextId = Math.max(...prev.map(r => r.id), 0) + 1;
@@ -747,6 +745,8 @@ export default function App() {
       return [...prev, ...toAdd];
     });
   }, []);
+
+  if (!ready) return <div style={{minHeight:"100vh",background:"#020617",display:"flex",alignItems:"center",justifyContent:"center",color:"#38bdf8",fontFamily:"sans-serif"}}>Loading SMS data…</div>;
 
   const tabs = [
     {id:"dashboard",label:"📊 Dashboard"},
