@@ -7,7 +7,7 @@ const SEED_ACTIONS = [];
 
 const ACTION_OWNERS = ["Tom Newell", "Tam Abrahams", "Joe Tomlin", "Liam Salt", "An Instructor"];
 const HAZARD_CATEGORIES = ["Flight Operations – Airborne", "Flight Operations – Ground", "Aircraft & Technical", "Training & Supervision", "Human Factors", "Organisational / Administrative"];
-const OPERATIONAL_AREAS = ["PPL Training", "IR(R) Training", "CBIR", "Aircraft Operations", "Ground Operations", "Maintenance Interface", "Airfield / ATC Interaction", "Administration / Scheduling"];
+const OPERATIONAL_AREAS = ["Pre-Flight / Dispatch", "Ground Handling", "Taxi Operations", "Take-off / Departure", "Circuit / Training Area Flying", "Navigation / En-route Flying", "Approach / Landing", "Aircraft Technical / Maintenance", "Air Traffic / Airspace", "Safety / Procedural", "Facilities / Airfield Environment", "Other / Not Listed"];
 const POTENTIAL_CONSEQUENCES = ["Minor aircraft damage", "Significant aircraft damage", "Serious aircraft damage / hull loss", "Serious injury", "Fatal injury", "Airspace infringement", "Loss of separation", "CFIT / terrain conflict", "Loss of control in flight", "Loss of communications", "Regulatory non-compliance", "Reputational damage"];
 const RISK_STATUSES = ["Open", "Under Review", "Mitigation In Progress", "Monitoring", "Closed"];
 const PIC_TYPES = ["Instructor", "Solo Student", "Licence Holder", "Other"];
