@@ -1,37 +1,40 @@
 import { createClient } from "redis";
 
-let client;
 async function getClient() {
-  if (!client) {
-    client = createClient({ url: process.env.REDIS_URL });
-    await client.connect();
-  }
+  const client = createClient({ url: process.env.REDIS_URL });
+  await client.connect();
   return client;
 }
 
 export async function GET(req) {
+  let redis;
   try {
     const { searchParams } = new URL(req.url);
     const key = searchParams.get("key");
     if (!key) return Response.json({ error: "No key" }, { status: 400 });
-    const redis = await getClient();
+    redis = await getClient();
     const raw = await redis.get(key);
     return Response.json({ value: raw ? JSON.parse(raw) : null });
   } catch (err) {
     console.error("GET error:", err);
-    return Response.json({ error: "Server error" }, { status: 500 });
+    return Response.json({ error: "Server error", detail: err.message }, { status: 500 });
+  } finally {
+    if (redis) await redis.disconnect();
   }
 }
 
 export async function POST(req) {
+  let redis;
   try {
     const { key, value } = await req.json();
     if (!key) return Response.json({ error: "No key" }, { status: 400 });
-    const redis = await getClient();
+    redis = await getClient();
     await redis.set(key, JSON.stringify(value));
     return Response.json({ ok: true });
   } catch (err) {
     console.error("POST error:", err);
-    return Response.json({ error: "Server error" }, { status: 500 });
+    return Response.json({ error: "Server error", detail: err.message }, { status: 500 });
+  } finally {
+    if (redis) await redis.disconnect();
   }
 }
