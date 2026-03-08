@@ -1,34 +1,20 @@
+"use client";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 
 export default function LandingPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState(false);
-  const [success, setSuccess] = useState(false);
+  const router = useRouter();
 
   function handleSubmit() {
     if (password.toLowerCase() === "limasierra") {
-      setSuccess(true);
+      sessionStorage.setItem("lsa_auth", "true");
+      router.push("/sms");
     } else {
       setError(true);
       setPassword("");
     }
-  }
-
-  if (success) {
-    return (
-      <div style={{
-        minHeight: "100vh",
-        background: "#0f172a",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontFamily: "system-ui, sans-serif"
-      }}>
-        <div style={{ color: "#22c55e", fontSize: "24px", fontWeight: 700 }}>
-          ✅ Correct — would load SMS app
-        </div>
-      </div>
-    );
   }
 
   return (
@@ -56,6 +42,7 @@ export default function LandingPage() {
         <p style={{ color: "#94a3b8", fontSize: "13px", marginBottom: "32px" }}>
           Safety Management System
         </p>
+
         <input
           type="password"
           placeholder="Enter password"
@@ -74,12 +61,14 @@ export default function LandingPage() {
             boxSizing: "border-box",
             marginBottom: "8px"
           }}
+          autoFocus
         />
         {error && (
           <p style={{ color: "#ef4444", fontSize: "13px", marginBottom: "12px" }}>
             Incorrect password
           </p>
         )}
+
         <button
           onClick={handleSubmit}
           style={{
