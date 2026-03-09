@@ -251,7 +251,7 @@ function RawReports({ reports, onRaise, setReports }) {
       <div style={{overflowX:"auto"}}>
         <table style={tableStyle}>
           <thead><tr>{["ID","Source","Date","Title","Aircraft","Location","PIC Type","Reporter","Status",""].map(h=><th key={h} style={thStyle}>{h}</th>)}</tr></thead>
-          <tbody>{filtered.map(r=>(
+          <tbody>{[...filtered].reverse().map(r=>(
             <tr key={r.id} style={{opacity: r.deletedAt ? 0.6 : 1}}>
               <td style={tdStyle}>{r.id}</td>
               <td style={tdStyle}>{r.source==="forms"?<Badge color="#818cf8">MS Forms</Badge>:r.source==="manual"?<Badge color="#38bdf8">Manual</Badge>:r.source==="excel-import"?<Badge color="#38bdf8">Import</Badge>:<Badge color="#475569">Excel</Badge>}</td>
@@ -362,7 +362,7 @@ function RiskRegister({ risks, setRisks, actions, setActions, raiseTarget, onRai
       <div style={{overflowX:"auto"}}>
         <table style={tableStyle}>
           <thead><tr>{["Hazard ID","Date","Aircraft","Hazard Title","Category","Init. Risk","Residual Risk","Actions","Status","Owner",""].map(h=><th key={h} style={thStyle}>{h}</th>)}</tr></thead>
-          <tbody>{filtered.map(r=>{
+          <tbody>{[...filtered].reverse().map(r=>{
             const score=riskScore(r.initSeverity,r.initLikelihood);const{label,color}=riskLevel(score);
             const resScore = riskScore(r.residualSeverity, r.residualLikelihood);
             const resLevel = resScore > 0 ? riskLevel(resScore) : null;
@@ -516,7 +516,7 @@ function ActionLog({ actions, setActions, risks }) {
       <div style={{overflowX:"auto"}}>
         <table style={tableStyle}>
           <thead><tr>{["Action ID","Hazard ID","Description","Owner","Target Date","Priority","Status","Overdue",""].map(h=><th key={h} style={thStyle}>{h}</th>)}</tr></thead>
-          <tbody>{filtered.map(a=>{const od=isOverdue(a.targetDate,a.status);return(
+          <tbody>{[...filtered].reverse().map(a=>{const od=isOverdue(a.targetDate,a.status);return(
             <tr key={a.id} style={{background:od&&!a.deletedAt?"#450a0a22":undefined, opacity: a.deletedAt ? 0.6 : 1}}>
               <td style={tdStyle}><span style={{color:"#38bdf8",fontWeight:700}}>{a.id}</span></td>
               <td style={tdStyle}><span style={{color:"#a78bfa"}}>{a.hazardId}</span></td>
