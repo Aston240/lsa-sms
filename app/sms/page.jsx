@@ -13,11 +13,13 @@ const OPERATIONAL_AREAS = ["Pre-Flight / Dispatch", "Ground Handling", "Taxi Ope
 const POTENTIAL_CONSEQUENCES = ["Minor aircraft damage", "Significant aircraft damage", "Serious aircraft damage / hull loss", "Serious injury", "Fatal injury", "Airspace infringement", "Loss of separation", "CFIT / terrain conflict", "Loss of control in flight", "Loss of communications", "Regulatory non-compliance", "Reputational damage"];
 const RISK_STATUSES = ["Open", "Under Review", "Mitigation In Progress", "Monitoring", "Closed"];
 const PIC_TYPES = ["Instructor", "Solo Student", "Licence Holder", "Other"];
+const BACKUP_SLOTS = 10;
 
 const riskScore = (s, l) => (s || 0) * (l || 0);
 const riskLevel = score => { if (score <= 4) return { label: "Low", color: "#22c55e" }; if (score <= 9) return { label: "Medium", color: "#f59e0b" }; if (score <= 15) return { label: "High", color: "#ef4444" }; return { label: "Intolerable", color: "#7c3aed" }; };
 const isOverdue = (targetDate, status) => !!(targetDate && status !== "Closed" && new Date(targetDate) < new Date());
 const fmt = d => d ? new Date(d).toLocaleDateString("en-GB") : "—";
+const fmtFull = d => d ? new Date(d).toLocaleString("en-GB") : "—";
 
 async function loadFromStorage(key, fallback) {
   try {
@@ -34,6 +36,32 @@ async function saveToStorage(key, value) {
       body: JSON.stringify({ key, value }),
     });
   } catch {}
+}
+
+// ── Backup helpers ────────────────────────────────────────────────────────────
+async function takeBackup(reports, risks, actions) {
+  try {
+    const slotMeta = await loadFromStorage("sms:backup:meta", { next: 1 });
+    const slot = ((slotMeta.next - 1) % BACKUP_SLOTS) + 1;
+    const next = (slot % BACKUP_SLOTS) + 1;
+    await saveToStorage(`sms:backup:${slot}`, {
+      takenAt: new Date().toISOString(),
+      slot,
+      reports,
+      risks,
+      actions,
+    });
+    await saveToStorage("sms:backup:meta", { next, lastBackup: new Date().toISOString() });
+  } catch {}
+}
+
+async function loadBackups() {
+  const results = [];
+  for (let i = 1; i <= BACKUP_SLOTS; i++) {
+    const b = await loadFromStorage(`sms:backup:${i}`, null);
+    if (b) results.push(b);
+  }
+  return results.sort((a, b) => new Date(b.takenAt) - new Date(a.takenAt));
 }
 
 // ── styles ────────────────────────────────────────────────────────────────────
@@ -68,27 +96,30 @@ const Input = ({ label, value, onChange, type="text", options, required, rows })
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 function Dashboard({ reports, risks, actions }) {
-  const closedRisks = risks.filter(r => r.status === "Closed").length;
-  const openActions = actions.filter(a => a.status !== "Closed").length;
-  const overdueActions = actions.filter(a => isOverdue(a.targetDate, a.status)).length;
-  const highRisks = risks.filter(r => riskScore(r.initSeverity, r.initLikelihood) >= 10).length;
-  const pendingReports = reports.filter(r => !r.acknowledged).length;
-  const byCat = {}; risks.forEach(r => { byCat[r.hazardCategory] = (byCat[r.hazardCategory]||0)+1; });
+  const activeReports = reports.filter(r => !r.deletedAt);
+  const activeRisks = risks.filter(r => !r.deletedAt);
+  const activeActions = actions.filter(a => !a.deletedAt);
+  const closedRisks = activeRisks.filter(r => r.status === "Closed").length;
+  const openActions = activeActions.filter(a => a.status !== "Closed").length;
+  const overdueActions = activeActions.filter(a => isOverdue(a.targetDate, a.status)).length;
+  const highRisks = activeRisks.filter(r => riskScore(r.initSeverity, r.initLikelihood) >= 10).length;
+  const pendingReports = activeReports.filter(r => !r.acknowledged).length;
+  const byCat = {}; activeRisks.forEach(r => { byCat[r.hazardCategory] = (byCat[r.hazardCategory]||0)+1; });
   const catEntries = Object.entries(byCat).sort((a,b)=>b[1]-a[1]);
-  const byAc = {}; risks.forEach(r => { byAc[r.aircraft] = (byAc[r.aircraft]||0)+1; });
+  const byAc = {}; activeRisks.forEach(r => { byAc[r.aircraft] = (byAc[r.aircraft]||0)+1; });
   const acEntries = Object.entries(byAc).sort((a,b)=>b[1]-a[1]);
-  const byMonth = {}; reports.forEach(r => { const m=r.incidentDate.slice(0,7); byMonth[m]=(byMonth[m]||0)+1; });
+  const byMonth = {}; activeReports.forEach(r => { const m=r.incidentDate.slice(0,7); byMonth[m]=(byMonth[m]||0)+1; });
   const monthEntries = Object.entries(byMonth).sort();
   const maxCat = catEntries[0]?.[1]||1, maxAc = acEntries[0]?.[1]||1, maxMonth = Math.max(...Object.values(byMonth),1);
   const BAR_COLORS = ["#38bdf8","#a78bfa","#22c55e","#f59e0b","#ef4444","#818cf8","#34d399","#fb923c","#e879f9","#facc15","#60a5fa","#f472b6"];
   const attentionItems = [
-    ...reports.filter(r=>!r.acknowledged).map(r=>({type:"report",label:`Report: ${r.title}`,sub:`#${r.id} · ${fmt(r.incidentDate)}`,color:"#f59e0b"})),
-    ...actions.filter(a=>isOverdue(a.targetDate,a.status)).map(a=>({type:"action",label:`Overdue: ${a.description||a.id}`,sub:`${a.hazardId} · Due ${fmt(a.targetDate)}`,color:"#ef4444"})),
+    ...activeReports.filter(r=>!r.acknowledged).map(r=>({type:"report",label:`Report: ${r.title}`,sub:`#${r.id} · ${fmt(r.incidentDate)}`,color:"#f59e0b"})),
+    ...activeActions.filter(a=>isOverdue(a.targetDate,a.status)).map(a=>({type:"action",label:`Overdue: ${a.description||a.id}`,sub:`${a.hazardId} · Due ${fmt(a.targetDate)}`,color:"#ef4444"})),
   ];
   return (
     <div style={{display:"flex",flexDirection:"column",gap:24}}>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:16}}>
-        {[{label:"Total Reports",value:reports.length,color:"#38bdf8"},{label:"Pending Review",value:pendingReports,color:"#f59e0b"},{label:"Closed Risks",value:closedRisks,color:"#22c55e"},{label:"Open Actions",value:openActions,color:"#818cf8"},{label:"Overdue",value:overdueActions,color:"#ef4444"},{label:"High / Intolerable",value:highRisks,color:"#7c3aed"}].map(k=>(
+        {[{label:"Total Reports",value:activeReports.length,color:"#38bdf8"},{label:"Pending Review",value:pendingReports,color:"#f59e0b"},{label:"Closed Risks",value:closedRisks,color:"#22c55e"},{label:"Open Actions",value:openActions,color:"#818cf8"},{label:"Overdue",value:overdueActions,color:"#ef4444"},{label:"High / Intolerable",value:highRisks,color:"#7c3aed"}].map(k=>(
           <div key={k.label} style={{background:"#0f172a",border:`1px solid ${k.color}33`,borderRadius:10,padding:"18px 20px"}}>
             <div style={{fontSize:32,fontWeight:800,color:k.color,fontFamily:"'Bebas Neue',sans-serif",lineHeight:1}}>{k.value}</div>
             <div style={{fontSize:11,color:"#64748b",marginTop:4,letterSpacing:".5px",textTransform:"uppercase"}}>{k.label}</div>
@@ -181,16 +212,21 @@ function SubmitReport({ onSubmit }) {
 // ── Raw Reports ───────────────────────────────────────────────────────────────
 function RawReports({ reports, onRaise, setReports }) {
   const [search, setSearch] = useState("");
+  const [showDeleted, setShowDeleted] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
-  const filtered = reports.filter(r=>r.title.toLowerCase().includes(search.toLowerCase())||r.aircraft.toLowerCase().includes(search.toLowerCase()));
-  const doDelete = id => { setReports(prev=>prev.filter(r=>r.id!==id)); setConfirmDelete(null); };
+  const active = reports.filter(r => !r.deletedAt);
+  const deleted = reports.filter(r => !!r.deletedAt);
+  const list = showDeleted ? deleted : active;
+  const filtered = list.filter(r => r.title.toLowerCase().includes(search.toLowerCase()) || (r.aircraft||"").toLowerCase().includes(search.toLowerCase()));
+  const doDelete = id => { setReports(prev => prev.map(r => r.id===id ? {...r, deletedAt: new Date().toISOString()} : r)); setConfirmDelete(null); };
+  const doRestore = id => { setReports(prev => prev.map(r => r.id===id ? {...r, deletedAt: null} : r)); };
   return (
     <div>
       {confirmDelete && (
         <div style={{position:"fixed",inset:0,background:"#00000088",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}}>
           <div style={{background:"#0f172a",border:"1px solid #ef4444",borderRadius:10,padding:28,maxWidth:400,width:"90%"}}>
             <div style={{fontSize:16,fontWeight:700,color:"#e2e8f0",marginBottom:8}}>Delete Report?</div>
-            <div style={{fontSize:13,color:"#94a3b8",marginBottom:20}}>Are you sure you want to delete report <strong style={{color:"#38bdf8"}}>#{confirmDelete.id} — {confirmDelete.title}</strong>? This cannot be undone.</div>
+            <div style={{fontSize:13,color:"#94a3b8",marginBottom:20}}>This will move report <strong style={{color:"#38bdf8"}}>#{confirmDelete.id} — {confirmDelete.title}</strong> to Recently Deleted where it can be restored.</div>
             <div style={{display:"flex",gap:10}}>
               <button onClick={()=>doDelete(confirmDelete.id)} style={{...btnPrimary,background:"#ef4444"}}>Yes, Delete</button>
               <button onClick={()=>setConfirmDelete(null)} style={btnSecondary}>Cancel</button>
@@ -198,15 +234,25 @@ function RawReports({ reports, onRaise, setReports }) {
           </div>
         </div>
       )}
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-        <h2 style={h2Style}>Raw Reports ({filtered.length})</h2>
-        <input placeholder="Search…" value={search} onChange={e=>setSearch(e.target.value)} style={{...inputStyle,width:200}} />
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
+        <h2 style={{...h2Style,marginBottom:0}}>Raw Reports ({filtered.length})</h2>
+        <div style={{display:"flex",gap:10,alignItems:"center"}}>
+          <input placeholder="Search…" value={search} onChange={e=>setSearch(e.target.value)} style={{...inputStyle,width:200}} />
+          <button onClick={()=>setShowDeleted(v=>!v)} style={{...btnSmall, background: showDeleted?"#7c3aed22":"#1e293b", color: showDeleted?"#a78bfa":"#94a3b8", border: showDeleted?"1px solid #7c3aed44":"1px solid #334155"}}>
+            🗑 Recently Deleted {deleted.length > 0 && `(${deleted.length})`}
+          </button>
+        </div>
       </div>
+      {showDeleted && (
+        <div style={{background:"#1c0a2e",border:"1px solid #7c3aed44",borderRadius:8,padding:"10px 16px",marginBottom:16,fontSize:13,color:"#a78bfa"}}>
+          Showing recently deleted reports. Click Restore to recover any item.
+        </div>
+      )}
       <div style={{overflowX:"auto"}}>
         <table style={tableStyle}>
           <thead><tr>{["ID","Source","Date","Title","Aircraft","Location","PIC Type","Reporter","Status",""].map(h=><th key={h} style={thStyle}>{h}</th>)}</tr></thead>
           <tbody>{filtered.map(r=>(
-            <tr key={r.id}>
+            <tr key={r.id} style={{opacity: r.deletedAt ? 0.6 : 1}}>
               <td style={tdStyle}>{r.id}</td>
               <td style={tdStyle}>{r.source==="forms"?<Badge color="#818cf8">MS Forms</Badge>:r.source==="manual"?<Badge color="#38bdf8">Manual</Badge>:r.source==="excel-import"?<Badge color="#38bdf8">Import</Badge>:<Badge color="#475569">Excel</Badge>}</td>
               <td style={tdStyle}>{fmt(r.incidentDate)}</td>
@@ -215,13 +261,17 @@ function RawReports({ reports, onRaise, setReports }) {
               <td style={tdStyle}>{r.location}</td>
               <td style={tdStyle}>{r.picType}</td>
               <td style={tdStyle}>{r.reporterDetails||<span style={{color:"#475569"}}>Anonymous</span>}</td>
-              <td style={tdStyle}>{r.acknowledged ? <Badge color="#22c55e">✓ Acknowledged</Badge> : <Badge color="#f59e0b">Pending Review</Badge>}</td>
+              <td style={tdStyle}>{r.deletedAt ? <Badge color="#7c3aed">Deleted {fmt(r.deletedAt)}</Badge> : r.acknowledged ? <Badge color="#22c55e">✓ Acknowledged</Badge> : <Badge color="#f59e0b">Pending Review</Badge>}</td>
               <td style={tdStyle}>
                 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                  {!r.acknowledged && (
-                    <button onClick={()=>onRaise(r)} style={{...btnSmall,background:"#0ea5e933",color:"#38bdf8",border:"1px solid #0ea5e955"}}>↗ Raise</button>
+                  {r.deletedAt ? (
+                    <button onClick={()=>doRestore(r.id)} style={{...btnSmall,background:"#22c55e22",color:"#22c55e",border:"1px solid #22c55e44"}}>↩ Restore</button>
+                  ) : (
+                    <>
+                      {!r.acknowledged && <button onClick={()=>onRaise(r)} style={{...btnSmall,background:"#0ea5e933",color:"#38bdf8",border:"1px solid #0ea5e955"}}>↗ Raise</button>}
+                      <button onClick={()=>setConfirmDelete(r)} style={{...btnSmall,background:"#ef444422",color:"#ef4444",border:"1px solid #ef444444"}}>🗑</button>
+                    </>
                   )}
-                  <button onClick={()=>setConfirmDelete(r)} style={{...btnSmall,background:"#ef444422",color:"#ef4444",border:"1px solid #ef444444"}}>🗑</button>
                 </div>
               </td>
             </tr>
@@ -237,8 +287,12 @@ function RiskRegister({ risks, setRisks, actions, setActions, raiseTarget, onRai
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
+  const [showDeleted, setShowDeleted] = useState(false);
   const [confirmDeleteRisk, setConfirmDeleteRisk] = useState(null);
-  const filtered = risks.filter(r=>(!search||(r.id+r.hazardDescription+r.aircraft).toLowerCase().includes(search.toLowerCase()))&&(!filterStatus||r.status===filterStatus));
+  const active = risks.filter(r => !r.deletedAt);
+  const deleted = risks.filter(r => !!r.deletedAt);
+  const list = showDeleted ? deleted : active;
+  const filtered = list.filter(r=>(!search||(r.id+r.hazardDescription+r.aircraft).toLowerCase().includes(search.toLowerCase()))&&(!filterStatus||r.status===filterStatus));
   const save = updated => { setRisks(prev=>prev.map(r=>r.id===updated.id?updated:r)); setEditing(null); };
   const addAction = newAction => {
     setActions(prev => {
@@ -247,31 +301,19 @@ function RiskRegister({ risks, setRisks, actions, setActions, raiseTarget, onRai
       return [...prev, {...newAction, id: nextId}];
     });
   };
+  const doDelete = id => { setRisks(prev => prev.map(r => r.id===id ? {...r, deletedAt: new Date().toISOString()} : r)); setConfirmDeleteRisk(null); };
+  const doRestore = id => { setRisks(prev => prev.map(r => r.id===id ? {...r, deletedAt: null} : r)); };
 
-  // Show pre-filled new risk form when raising from a report
   if (raiseTarget) {
     const prefilled = {
-      id: "NEW",
-      reportId: raiseTarget.id,
+      id: "NEW", reportId: raiseTarget.id,
       dateIdentified: raiseTarget.incidentDate || new Date().toISOString().slice(0,10),
-      aircraft: raiseTarget.aircraft || "",
-      picType: raiseTarget.picType || "",
-      location: raiseTarget.location || "",
-      operationalArea: raiseTarget.operationalArea || "",
+      aircraft: raiseTarget.aircraft || "", picType: raiseTarget.picType || "",
+      location: raiseTarget.location || "", operationalArea: raiseTarget.operationalArea || "",
       hazardDescription: raiseTarget.title + (raiseTarget.what ? "\n\n" + raiseTarget.what : ""),
-      potentialConsequence: "",
-      hazardCategory: "",
-      initSeverity: 1,
-      initLikelihood: 1,
-      existingControls: "",
-      additionalMitigation: "",
-      actionOwner: "",
-      targetDate: "",
-      status: "Open",
-      dateImplemented: "",
-      residualSeverity: null,
-      residualLikelihood: null,
-      monitoringMethod: "",
+      potentialConsequence: "", hazardCategory: "", initSeverity: 1, initLikelihood: 1,
+      existingControls: "", additionalMitigation: "", actionOwner: "", targetDate: "",
+      status: "Open", dateImplemented: "", residualSeverity: null, residualLikelihood: null, monitoringMethod: "",
     };
     return (
       <div>
@@ -294,9 +336,9 @@ function RiskRegister({ risks, setRisks, actions, setActions, raiseTarget, onRai
         <div style={{position:"fixed",inset:0,background:"#00000088",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}}>
           <div style={{background:"#0f172a",border:"1px solid #ef4444",borderRadius:10,padding:28,maxWidth:400,width:"90%"}}>
             <div style={{fontSize:16,fontWeight:700,color:"#e2e8f0",marginBottom:8}}>Delete Risk Entry?</div>
-            <div style={{fontSize:13,color:"#94a3b8",marginBottom:20}}>Are you sure you want to delete <strong style={{color:"#38bdf8"}}>{confirmDeleteRisk.id}</strong>? This cannot be undone.</div>
+            <div style={{fontSize:13,color:"#94a3b8",marginBottom:20}}>This will move <strong style={{color:"#38bdf8"}}>{confirmDeleteRisk.id}</strong> to Recently Deleted where it can be restored.</div>
             <div style={{display:"flex",gap:10}}>
-              <button onClick={()=>{ setRisks(prev=>prev.filter(r=>r.id!==confirmDeleteRisk.id)); setConfirmDeleteRisk(null); }} style={{...btnPrimary,background:"#ef4444"}}>Yes, Delete</button>
+              <button onClick={()=>doDelete(confirmDeleteRisk.id)} style={{...btnPrimary,background:"#ef4444"}}>Yes, Delete</button>
               <button onClick={()=>setConfirmDeleteRisk(null)} style={btnSecondary}>Cancel</button>
             </div>
           </div>
@@ -308,24 +350,52 @@ function RiskRegister({ risks, setRisks, actions, setActions, raiseTarget, onRai
         <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)} style={{...inputStyle,width:180}}>
           <option value="">All Statuses</option>{RISK_STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
         </select>
+        <button onClick={()=>setShowDeleted(v=>!v)} style={{...btnSmall, background: showDeleted?"#7c3aed22":"#1e293b", color: showDeleted?"#a78bfa":"#94a3b8", border: showDeleted?"1px solid #7c3aed44":"1px solid #334155"}}>
+          🗑 Recently Deleted {deleted.length > 0 && `(${deleted.length})`}
+        </button>
       </div>
+      {showDeleted && (
+        <div style={{background:"#1c0a2e",border:"1px solid #7c3aed44",borderRadius:8,padding:"10px 16px",marginBottom:16,fontSize:13,color:"#a78bfa"}}>
+          Showing recently deleted risks. Click Restore to recover any item.
+        </div>
+      )}
       <div style={{overflowX:"auto"}}>
         <table style={tableStyle}>
-          <thead><tr>{["Hazard ID","Date","Aircraft","Hazard Title","Category","Consequence","Init. Risk","Status","Owner",""].map(h=><th key={h} style={thStyle}>{h}</th>)}</tr></thead>
+          <thead><tr>{["Hazard ID","Date","Aircraft","Hazard Title","Category","Init. Risk","Residual Risk","Actions","Status","Owner",""].map(h=><th key={h} style={thStyle}>{h}</th>)}</tr></thead>
           <tbody>{filtered.map(r=>{
             const score=riskScore(r.initSeverity,r.initLikelihood);const{label,color}=riskLevel(score);
-            const overdue=actions.filter(a=>a.hazardId===r.id).some(a=>isOverdue(a.targetDate,a.status));
-            return(<tr key={r.id}>
+            const resScore = riskScore(r.residualSeverity, r.residualLikelihood);
+            const resLevel = resScore > 0 ? riskLevel(resScore) : null;
+            const riskActions = actions.filter(a => a.hazardId === r.id && !a.deletedAt);
+            const overdue=riskActions.some(a=>isOverdue(a.targetDate,a.status));
+            return(<tr key={r.id} style={{opacity: r.deletedAt ? 0.6 : 1}}>
               <td style={tdStyle}><span style={{color:"#38bdf8",fontWeight:700}}>{r.id}</span></td>
               <td style={tdStyle}>{fmt(r.dateIdentified)}</td>
               <td style={tdStyle}>{r.aircraft}</td>
-              <td style={{...tdStyle,maxWidth:220,color:"#e2e8f0"}}>{r.hazardDescription.split("\n")[0]}</td>
+              <td style={{...tdStyle,maxWidth:200,color:"#e2e8f0"}}>{r.hazardDescription.split("\n")[0]}</td>
               <td style={{...tdStyle,fontSize:11,color:"#94a3b8"}}>{r.hazardCategory}</td>
-              <td style={{...tdStyle,fontSize:11,color:"#94a3b8"}}>{r.potentialConsequence}</td>
               <td style={tdStyle}><Badge color={color}>{score} – {label}</Badge></td>
+              <td style={tdStyle}>{resLevel ? <Badge color={resLevel.color}>{resScore} – {resLevel.label}</Badge> : <span style={{color:"#475569",fontSize:11}}>—</span>}</td>
+              <td style={tdStyle}>
+                {riskActions.length > 0
+                  ? <Badge color={overdue ? "#ef4444" : "#38bdf8"}>{riskActions.length} action{riskActions.length!==1?"s":""}{overdue?" ⚠":""}</Badge>
+                  : <span style={{color:"#475569",fontSize:11}}>none</span>
+                }
+              </td>
               <td style={tdStyle}><StatusBadge status={r.status}/></td>
               <td style={{...tdStyle,fontSize:12}}>{r.actionOwner}</td>
-              <td style={tdStyle}><div style={{display:"flex",gap:6,alignItems:"center"}}><button onClick={()=>setEditing(r)} style={btnSmall}>Edit</button>{overdue&&<Badge color="#ef4444">OVERDUE</Badge>}<button onClick={()=>setConfirmDeleteRisk(r)} style={{...btnSmall,background:"#ef444422",color:"#ef4444",border:"1px solid #ef444444"}}>🗑</button></div></td>
+              <td style={tdStyle}>
+                <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                  {r.deletedAt ? (
+                    <button onClick={()=>doRestore(r.id)} style={{...btnSmall,background:"#22c55e22",color:"#22c55e",border:"1px solid #22c55e44"}}>↩ Restore</button>
+                  ) : (
+                    <>
+                      <button onClick={()=>setEditing(r)} style={btnSmall}>Edit</button>
+                      <button onClick={()=>setConfirmDeleteRisk(r)} style={{...btnSmall,background:"#ef444422",color:"#ef4444",border:"1px solid #ef444444"}}>🗑</button>
+                    </>
+                  )}
+                </div>
+              </td>
             </tr>);
           })}</tbody>
         </table>
@@ -405,10 +475,16 @@ function ActionLog({ actions, setActions, risks }) {
   const [editing, setEditing] = useState(null);
   const [filterOwner, setFilterOwner] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
+  const [showDeleted, setShowDeleted] = useState(false);
   const [confirmDeleteAction, setConfirmDeleteAction] = useState(null);
-  const owners = [...new Set(actions.map(a=>a.owner))];
-  const filtered = actions.filter(a=>(!filterOwner||a.owner===filterOwner)&&(!filterStatus||a.status===filterStatus));
+  const active = actions.filter(a => !a.deletedAt);
+  const deleted = actions.filter(a => !!a.deletedAt);
+  const list = showDeleted ? deleted : active;
+  const owners = [...new Set(active.map(a=>a.owner))];
+  const filtered = list.filter(a=>(!filterOwner||a.owner===filterOwner)&&(!filterStatus||a.status===filterStatus));
   const save = updated => { setActions(prev=>prev.map(a=>a.id===updated.id?updated:a)); setEditing(null); };
+  const doDelete = id => { setActions(prev => prev.map(a => a.id===id ? {...a, deletedAt: new Date().toISOString()} : a)); setConfirmDeleteAction(null); };
+  const doRestore = id => { setActions(prev => prev.map(a => a.id===id ? {...a, deletedAt: null} : a)); };
   if (editing) return <ActionEditor action={editing} risks={risks} onSave={save} onCancel={()=>setEditing(null)} />;
   return (
     <div>
@@ -416,9 +492,9 @@ function ActionLog({ actions, setActions, risks }) {
         <div style={{position:"fixed",inset:0,background:"#00000088",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}}>
           <div style={{background:"#0f172a",border:"1px solid #ef4444",borderRadius:10,padding:28,maxWidth:400,width:"90%"}}>
             <div style={{fontSize:16,fontWeight:700,color:"#e2e8f0",marginBottom:8}}>Delete Action?</div>
-            <div style={{fontSize:13,color:"#94a3b8",marginBottom:20}}>Are you sure you want to delete action <strong style={{color:"#38bdf8"}}>{confirmDeleteAction.id}</strong>? This cannot be undone.</div>
+            <div style={{fontSize:13,color:"#94a3b8",marginBottom:20}}>This will move action <strong style={{color:"#38bdf8"}}>{confirmDeleteAction.id}</strong> to Recently Deleted where it can be restored.</div>
             <div style={{display:"flex",gap:10}}>
-              <button onClick={()=>{ setActions(prev=>prev.filter(a=>a.id!==confirmDeleteAction.id)); setConfirmDeleteAction(null); }} style={{...btnPrimary,background:"#ef4444"}}>Yes, Delete</button>
+              <button onClick={()=>doDelete(confirmDeleteAction.id)} style={{...btnPrimary,background:"#ef4444"}}>Yes, Delete</button>
               <button onClick={()=>setConfirmDeleteAction(null)} style={btnSecondary}>Cancel</button>
             </div>
           </div>
@@ -428,12 +504,20 @@ function ActionLog({ actions, setActions, risks }) {
         <h2 style={{...h2Style,marginBottom:0}}>Action Log ({filtered.length})</h2>
         <select value={filterOwner} onChange={e=>setFilterOwner(e.target.value)} style={{...inputStyle,width:160}}><option value="">All Owners</option>{owners.map(o=><option key={o} value={o}>{o}</option>)}</select>
         <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)} style={{...inputStyle,width:160}}><option value="">All Statuses</option>{["Open","In Progress","Closed"].map(s=><option key={s} value={s}>{s}</option>)}</select>
+        <button onClick={()=>setShowDeleted(v=>!v)} style={{...btnSmall, background: showDeleted?"#7c3aed22":"#1e293b", color: showDeleted?"#a78bfa":"#94a3b8", border: showDeleted?"1px solid #7c3aed44":"1px solid #334155"}}>
+          🗑 Recently Deleted {deleted.length > 0 && `(${deleted.length})`}
+        </button>
       </div>
+      {showDeleted && (
+        <div style={{background:"#1c0a2e",border:"1px solid #7c3aed44",borderRadius:8,padding:"10px 16px",marginBottom:16,fontSize:13,color:"#a78bfa"}}>
+          Showing recently deleted actions. Click Restore to recover any item.
+        </div>
+      )}
       <div style={{overflowX:"auto"}}>
         <table style={tableStyle}>
           <thead><tr>{["Action ID","Hazard ID","Description","Owner","Target Date","Priority","Status","Overdue",""].map(h=><th key={h} style={thStyle}>{h}</th>)}</tr></thead>
           <tbody>{filtered.map(a=>{const od=isOverdue(a.targetDate,a.status);return(
-            <tr key={a.id} style={{background:od?"#450a0a22":undefined}}>
+            <tr key={a.id} style={{background:od&&!a.deletedAt?"#450a0a22":undefined, opacity: a.deletedAt ? 0.6 : 1}}>
               <td style={tdStyle}><span style={{color:"#38bdf8",fontWeight:700}}>{a.id}</span></td>
               <td style={tdStyle}><span style={{color:"#a78bfa"}}>{a.hazardId}</span></td>
               <td style={{...tdStyle,maxWidth:260}}>{a.description}</td>
@@ -441,8 +525,19 @@ function ActionLog({ actions, setActions, risks }) {
               <td style={tdStyle}>{fmt(a.targetDate)}</td>
               <td style={tdStyle}><PriBadge p={a.priority}/></td>
               <td style={tdStyle}><StatusBadge status={a.status}/></td>
-              <td style={tdStyle}>{od&&<Badge color="#ef4444">OVERDUE</Badge>}</td>
-              <td style={tdStyle}><div style={{display:"flex",gap:6}}><button onClick={()=>setEditing(a)} style={btnSmall}>Edit</button><button onClick={()=>setConfirmDeleteAction(a)} style={{...btnSmall,background:"#ef444422",color:"#ef4444",border:"1px solid #ef444444"}}>🗑</button></div></td>
+              <td style={tdStyle}>{od&&!a.deletedAt&&<Badge color="#ef4444">OVERDUE</Badge>}</td>
+              <td style={tdStyle}>
+                <div style={{display:"flex",gap:6}}>
+                  {a.deletedAt ? (
+                    <button onClick={()=>doRestore(a.id)} style={{...btnSmall,background:"#22c55e22",color:"#22c55e",border:"1px solid #22c55e44"}}>↩ Restore</button>
+                  ) : (
+                    <>
+                      <button onClick={()=>setEditing(a)} style={btnSmall}>Edit</button>
+                      <button onClick={()=>setConfirmDeleteAction(a)} style={{...btnSmall,background:"#ef444422",color:"#ef4444",border:"1px solid #ef444444"}}>🗑</button>
+                    </>
+                  )}
+                </div>
+              </td>
             </tr>
           );})}</tbody>
         </table>
@@ -485,23 +580,16 @@ function ExcelImport({ reports, onImport }) {
     const file = e.target.files[0];
     if (!file) return;
     setStatus(null); setPreview(null);
-
     try {
       const { read, utils } = await import("xlsx");
       const buf = await file.arrayBuffer();
       const wb = read(buf);
       const ws = wb.Sheets[wb.SheetNames[0]];
       const rows = utils.sheet_to_json(ws, { defval: "" });
-
       if (!rows.length) { setStatus({ ok: false, msg: "No data found in file." }); return; }
-
-      // Detect MS Forms column names
       const first = rows[0];
       const keys = Object.keys(first);
-
-      // Map columns — try to auto-detect by fuzzy matching
       const find = (...terms) => keys.find(k => terms.some(t => k.toLowerCase().includes(t.toLowerCase()))) || "";
-
       const titleCol = find("title", "brief");
       const dateCol = find("date of incident", "incident date", "date");
       const locationCol = find("location", "where", "place");
@@ -510,13 +598,7 @@ function ExcelImport({ reports, onImport }) {
       const whatCol = find("what happened", "factual", "what");
       const reporterCol = find("reporter", "name", "contact", "details");
       const submittedCol = find("start time", "submitted", "completion");
-
-      if (!titleCol && !whatCol) {
-        setStatus({ ok: false, msg: "Could not recognise this file format. Make sure it's a Microsoft Forms Excel export." });
-        return;
-      }
-
-      // Build candidate reports
+      if (!titleCol && !whatCol) { setStatus({ ok: false, msg: "Could not recognise this file format. Make sure it's a Microsoft Forms Excel export." }); return; }
       const candidates = rows.map((row, i) => ({
         _rowIndex: i,
         submittedAt: submittedCol && row[submittedCol] ? new Date(row[submittedCol]).toISOString() : new Date().toISOString(),
@@ -530,12 +612,9 @@ function ExcelImport({ reports, onImport }) {
         reporterDetails: reporterCol ? String(row[reporterCol] || "").trim() : "",
         source: "excel-import",
       }));
-
-      // Deduplicate against existing reports
       const existingKeys = new Set(reports.map(r => dedupeKey(r)));
       const newOnes = candidates.filter(c => !existingKeys.has(dedupeKey(c)));
       const dupes = candidates.length - newOnes.length;
-
       setPreview({ candidates, newOnes, dupes, totalRows: rows.length });
     } catch (err) {
       setStatus({ ok: false, msg: "Error reading file: " + err.message });
@@ -544,14 +623,9 @@ function ExcelImport({ reports, onImport }) {
   };
 
   const dedupeKey = (r) => `${r.incidentDate}__${String(r.title || "").trim().toLowerCase().slice(0, 40)}`;
-
   const formatExcelDate = (val) => {
     if (!val) return "";
-    if (typeof val === "number") {
-      // Excel serial date
-      const d = new Date((val - 25569) * 86400 * 1000);
-      return d.toISOString().slice(0, 10);
-    }
+    if (typeof val === "number") { const d = new Date((val - 25569) * 86400 * 1000); return d.toISOString().slice(0, 10); }
     try { return new Date(val).toISOString().slice(0, 10); } catch { return String(val); }
   };
 
@@ -567,10 +641,7 @@ function ExcelImport({ reports, onImport }) {
   return (
     <div style={{ maxWidth: 720 }}>
       <h2 style={h2Style}>📥 Import from Microsoft Forms Excel</h2>
-      <p style={{ color: "#64748b", fontSize: 13, marginBottom: 24 }}>
-        Download your responses from Microsoft Forms as Excel, then drag the file here. The app will automatically skip any reports already in the system — so you can import as often as you like without creating duplicates.
-      </p>
-
+      <p style={{ color: "#64748b", fontSize: 13, marginBottom: 24 }}>Download your responses from Microsoft Forms as Excel, then drag the file here. The app will automatically skip any reports already in the system.</p>
       <div style={{ background: "#0f172a", border: "2px dashed #334155", borderRadius: 10, padding: "32px 24px", textAlign: "center", marginBottom: 20 }}>
         <div style={{ fontSize: 32, marginBottom: 8 }}>📂</div>
         <div style={{ color: "#94a3b8", fontSize: 14, marginBottom: 16 }}>Drag your Excel file here or click to browse</div>
@@ -579,47 +650,26 @@ function ExcelImport({ reports, onImport }) {
           <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFile} style={{ display: "none" }} />
         </label>
       </div>
-
       <div style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 10, padding: "16px 20px", marginBottom: 20 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", letterSpacing: "1px", textTransform: "uppercase", marginBottom: 10 }}>How to export from Microsoft Forms</div>
-        {[
-          "Go to forms.microsoft.com and open your safety report form",
-          'Click "Responses" at the top',
-          'Click the Excel icon or "Open in Excel" button',
-          "Save the downloaded file to your computer",
-          "Drag it into the box above",
-        ].map((s, i) => (
+        {["Go to forms.microsoft.com and open your safety report form",'Click "Responses" at the top','Click the Excel icon or "Open in Excel" button',"Save the downloaded file to your computer","Drag it into the box above"].map((s, i) => (
           <div key={i} style={{ display: "flex", gap: 10, marginBottom: 6, fontSize: 13, color: "#94a3b8" }}>
-            <span style={{ color: "#38bdf8", fontWeight: 700, minWidth: 18 }}>{i + 1}.</span>
-            <span>{s}</span>
+            <span style={{ color: "#38bdf8", fontWeight: 700, minWidth: 18 }}>{i + 1}.</span><span>{s}</span>
           </div>
         ))}
       </div>
-
-      {status && (
-        <div style={{ background: status.ok ? "#14532d" : "#450a0a", border: `1px solid ${status.ok ? "#22c55e" : "#ef4444"}`, borderRadius: 8, padding: "12px 16px", marginBottom: 16, color: status.ok ? "#86efac" : "#fca5a5", fontSize: 13 }}>
-          {status.msg}
-        </div>
-      )}
-
+      {status && <div style={{ background: status.ok ? "#14532d" : "#450a0a", border: `1px solid ${status.ok ? "#22c55e" : "#ef4444"}`, borderRadius: 8, padding: "12px 16px", marginBottom: 16, color: status.ok ? "#86efac" : "#fca5a5", fontSize: 13 }}>{status.msg}</div>}
       {preview && (
         <div style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 10, padding: "20px" }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", marginBottom: 12 }}>Preview</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
-            <div style={{ background: "#020617", borderRadius: 8, padding: "12px 16px", textAlign: "center" }}>
-              <div style={{ fontSize: 28, fontWeight: 800, color: "#38bdf8", fontFamily: "'Bebas Neue', sans-serif" }}>{preview.totalRows}</div>
-              <div style={{ fontSize: 11, color: "#64748b" }}>ROWS IN FILE</div>
-            </div>
-            <div style={{ background: "#020617", borderRadius: 8, padding: "12px 16px", textAlign: "center" }}>
-              <div style={{ fontSize: 28, fontWeight: 800, color: "#22c55e", fontFamily: "'Bebas Neue', sans-serif" }}>{preview.newOnes.length}</div>
-              <div style={{ fontSize: 11, color: "#64748b" }}>NEW TO IMPORT</div>
-            </div>
-            <div style={{ background: "#020617", borderRadius: 8, padding: "12px 16px", textAlign: "center" }}>
-              <div style={{ fontSize: 28, fontWeight: 800, color: "#f59e0b", fontFamily: "'Bebas Neue', sans-serif" }}>{preview.dupes}</div>
-              <div style={{ fontSize: 11, color: "#64748b" }}>DUPLICATES SKIPPED</div>
-            </div>
+            {[{v:preview.totalRows,l:"ROWS IN FILE",c:"#38bdf8"},{v:preview.newOnes.length,l:"NEW TO IMPORT",c:"#22c55e"},{v:preview.dupes,l:"DUPLICATES SKIPPED",c:"#f59e0b"}].map(({v,l,c})=>(
+              <div key={l} style={{ background: "#020617", borderRadius: 8, padding: "12px 16px", textAlign: "center" }}>
+                <div style={{ fontSize: 28, fontWeight: 800, color: c, fontFamily: "'Bebas Neue', sans-serif" }}>{v}</div>
+                <div style={{ fontSize: 11, color: "#64748b" }}>{l}</div>
+              </div>
+            ))}
           </div>
-
           {preview.newOnes.length > 0 ? (
             <>
               <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>New reports to be added:</div>
@@ -631,9 +681,7 @@ function ExcelImport({ reports, onImport }) {
                   </div>
                 ))}
               </div>
-              <button onClick={confirmImport} disabled={importing} style={{ ...btnPrimary, background: "#22c55e" }}>
-                ✓ Import {preview.newOnes.length} New Report{preview.newOnes.length !== 1 ? "s" : ""}
-              </button>
+              <button onClick={confirmImport} disabled={importing} style={{ ...btnPrimary, background: "#22c55e" }}>✓ Import {preview.newOnes.length} New Report{preview.newOnes.length !== 1 ? "s" : ""}</button>
             </>
           ) : (
             <div style={{ color: "#f59e0b", fontSize: 13 }}>⚠ All {preview.totalRows} rows already exist in the system — nothing new to import.</div>
@@ -644,11 +692,77 @@ function ExcelImport({ reports, onImport }) {
   );
 }
 
+// ── Backups ───────────────────────────────────────────────────────────────────
+function BackupsTab({ onRestore }) {
+  const [backups, setBackups] = useState(null);
+  const [confirmRestore, setConfirmRestore] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [restoring, setRestoring] = useState(false);
+
+  useEffect(() => {
+    loadBackups().then(b => { setBackups(b); setLoading(false); });
+  }, []);
+
+  const doRestore = async (backup) => {
+    setRestoring(true);
+    await onRestore(backup);
+    setConfirmRestore(null);
+    setRestoring(false);
+  };
+
+  return (
+    <div style={{maxWidth:780}}>
+      {confirmRestore && (
+        <div style={{position:"fixed",inset:0,background:"#00000088",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div style={{background:"#0f172a",border:"1px solid #f59e0b",borderRadius:10,padding:28,maxWidth:440,width:"90%"}}>
+            <div style={{fontSize:16,fontWeight:700,color:"#e2e8f0",marginBottom:8}}>⚠ Restore this Backup?</div>
+            <div style={{fontSize:13,color:"#94a3b8",marginBottom:8}}>This will replace all current reports, risks, and actions with the backup taken on:</div>
+            <div style={{fontSize:14,fontWeight:700,color:"#f59e0b",marginBottom:20}}>{fmtFull(confirmRestore.takenAt)}</div>
+            <div style={{fontSize:13,color:"#94a3b8",marginBottom:20}}>A backup of your current data will be taken automatically before restoring.</div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>doRestore(confirmRestore)} disabled={restoring} style={{...btnPrimary,background:"#f59e0b",color:"#000"}}>{restoring ? "Restoring…" : "Yes, Restore"}</button>
+              <button onClick={()=>setConfirmRestore(null)} style={btnSecondary}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+      <h2 style={h2Style}>🔄 Backups & Recovery</h2>
+      <p style={{color:"#64748b",fontSize:13,marginBottom:24}}>
+        The system automatically backs up all data on every login and every 24 hours. The last {BACKUP_SLOTS} backups are stored — older ones are overwritten automatically.
+        Click Restore on any backup to roll the system back to that point.
+      </p>
+      {loading ? (
+        <div style={{color:"#475569",fontSize:13}}>Loading backups…</div>
+      ) : backups.length === 0 ? (
+        <div style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:10,padding:24,color:"#475569",fontSize:13}}>
+          No backups yet. One will be taken automatically on your next login.
+        </div>
+      ) : (
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {backups.map((b, i) => (
+            <div key={b.slot} style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:10,padding:"16px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:700,color:"#e2e8f0",marginBottom:4}}>
+                  {i === 0 && <Badge color="#22c55e">Latest</Badge>} Backup — Slot {b.slot}
+                </div>
+                <div style={{fontSize:12,color:"#64748b"}}>{fmtFull(b.takenAt)}</div>
+                <div style={{fontSize:11,color:"#475569",marginTop:4}}>
+                  {b.reports?.length ?? 0} reports · {b.risks?.length ?? 0} risks · {b.actions?.length ?? 0} actions
+                </div>
+              </div>
+              <button onClick={()=>setConfirmRestore(b)} style={{...btnSmall,background:"#f59e0b22",color:"#f59e0b",border:"1px solid #f59e0b44"}}>↩ Restore</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── MS Forms Integration Guide ────────────────────────────────────────────────
 function IntegrationGuide({ webhookSecret, onSecretChange }) {
   const [copied, setCopied] = useState(null);
   const copy = (text, key) => { navigator.clipboard.writeText(text); setCopied(key); setTimeout(()=>setCopied(null),2000); };
-
   const jsonTemplate = JSON.stringify({
     secret: webhookSecret||"YOUR_SECRET_HERE",
     incidentDate: "REPLACE_WITH_DYNAMIC: Date of incident question",
@@ -660,13 +774,10 @@ function IntegrationGuide({ webhookSecret, onSecretChange }) {
     what: "REPLACE_WITH_DYNAMIC: What happened question",
     reporterDetails: "REPLACE_WITH_DYNAMIC: Reporter details question"
   }, null, 2);
-
   return (
     <div style={{maxWidth:780}}>
       <h2 style={h2Style}>🔗 Microsoft Forms → Power Automate Setup</h2>
       <p style={{color:"#64748b",fontSize:13,marginBottom:28}}>Follow these 8 steps to automatically push new Microsoft Forms submissions into this SMS system in real time.</p>
-
-      {/* Step 1 */}
       <Step n="1" title="Set your Webhook Secret">
         <p style={stepP}>This is a shared password between your Power Automate flow and this app. It prevents anyone else from sending fake reports.</p>
         <div style={{display:"flex",gap:10,alignItems:"center",marginTop:10}}>
@@ -675,65 +786,38 @@ function IntegrationGuide({ webhookSecret, onSecretChange }) {
         </div>
         <p style={{...stepP,color:"#f59e0b",marginTop:8,fontSize:12}}>⚠ Save this somewhere safe — you'll need it in Step 6.</p>
       </Step>
-
-      {/* Step 2 */}
       <Step n="2" title="Go to Power Automate">
         <p style={stepP}>Open <strong style={{color:"#38bdf8"}}>flow.microsoft.com</strong> and sign in with your Microsoft 365 account. Click <strong style={{color:"#e2e8f0"}}>+ Create</strong> → <strong style={{color:"#e2e8f0"}}>Automated cloud flow</strong>. Name it something like "LSA SMS – New Report".</p>
       </Step>
-
-      {/* Step 3 */}
       <Step n="3" title='Add Trigger: "When a new response is submitted"'>
         <p style={stepP}>Search for <strong style={{color:"#e2e8f0"}}>Microsoft Forms</strong> in the trigger search box. Select <strong style={{color:"#e2e8f0"}}>When a new response is submitted</strong>. In the Form ID dropdown, choose your safety report form.</p>
       </Step>
-
-      {/* Step 4 */}
       <Step n="4" title='Add Action: "Get response details"'>
         <p style={stepP}>Click <strong style={{color:"#e2e8f0"}}>+ New step</strong> and search for <strong style={{color:"#e2e8f0"}}>Get response details</strong> (Microsoft Forms). Set Form ID to your form again, and set Response ID to the dynamic value <code style={codeStyle}>List of response notifications Response Id</code> from the trigger.</p>
       </Step>
-
-      {/* Step 5 */}
       <Step n="5" title="Add Action: HTTP POST">
-        <p style={stepP}>Add another step and search for <strong style={{color:"#e2e8f0"}}>HTTP</strong> (the built-in connector, not a premium one). Configure it like this:</p>
+        <p style={stepP}>Add another step and search for <strong style={{color:"#e2e8f0"}}>HTTP</strong> (the built-in connector). Configure it:</p>
         <div style={{background:"#020617",border:"1px solid #1e293b",borderRadius:8,padding:14,marginTop:10,fontFamily:"monospace",fontSize:12,color:"#94a3b8"}}>
           <div><span style={{color:"#475569"}}>Method: </span><span style={{color:"#22c55e"}}>POST</span></div>
-          <div style={{marginTop:6}}><span style={{color:"#475569"}}>URI: </span><span style={{color:"#38bdf8"}}>https://your-hosted-sms-app.com/api/webhook</span></div>
+          <div style={{marginTop:6}}><span style={{color:"#475569"}}>URI: </span><span style={{color:"#38bdf8"}}>https://lsa-sms.vercel.app/api/webhook</span></div>
           <div style={{marginTop:6}}><span style={{color:"#475569"}}>Headers: </span><span style={{color:"#e2e8f0"}}>Content-Type: application/json</span></div>
         </div>
-        <div style={{background:"#1c1917",border:"1px solid #f59e0b33",borderRadius:8,padding:"10px 14px",marginTop:10}}>
-          <p style={{...stepP,color:"#fbbf24",fontSize:12}}>📌 <strong>Running in Claude.ai?</strong> Use the "Simulate Webhook" panel below to test the integration — this app currently runs in Claude's sandbox so can't receive live HTTP calls. To go fully live, host the app on your own server (e.g. Vercel, Netlify, or a club server) where it can expose a real <code style={codeStyle}>/api/webhook</code> endpoint.</p>
-        </div>
       </Step>
-
-      {/* Step 6 */}
       <Step n="6" title="Build the JSON body — map your form fields">
-        <p style={stepP}>In the HTTP action's Body field, paste the template below, then replace each <code style={codeStyle}>REPLACE_WITH_DYNAMIC</code> value with the actual dynamic content from your "Get response details" step (click the lightning bolt icon in Power Automate to insert dynamic values):</p>
+        <p style={stepP}>In the HTTP action's Body field, paste the template below, then replace each <code style={codeStyle}>REPLACE_WITH_DYNAMIC</code> value with actual dynamic content from your form:</p>
         <div style={{position:"relative",marginTop:10}}>
           <pre style={{background:"#020617",border:"1px solid #1e293b",borderRadius:8,padding:14,fontSize:11,color:"#94a3b8",overflow:"auto",maxHeight:300}}>{jsonTemplate}</pre>
           <button onClick={()=>copy(jsonTemplate,"json")} style={{...btnSmall,position:"absolute",top:12,right:12}}>{copied==="json"?"✓ Copied":"Copy template"}</button>
         </div>
-        <p style={{...stepP,color:"#f59e0b",marginTop:8,fontSize:12}}>⚠ Make sure the <code style={codeStyle}>secret</code> field exactly matches your secret from Step 1: <strong style={{color:"#38bdf8"}}>{webhookSecret||"(set a secret above)"}</strong></p>
+        <p style={{...stepP,color:"#f59e0b",marginTop:8,fontSize:12}}>⚠ Make sure the <code style={codeStyle}>secret</code> field exactly matches: <strong style={{color:"#38bdf8"}}>{webhookSecret||"(set above)"}</strong></p>
       </Step>
-
-      {/* Step 7 */}
       <Step n="7" title="Save and enable the flow">
-        <p style={stepP}>Click <strong style={{color:"#e2e8f0"}}>Save</strong> in Power Automate. The flow will now trigger automatically every time someone submits your Microsoft Form. You can test it by submitting a dummy response — it should appear in Raw Reports within seconds with a <Badge color="#818cf8">MS Forms</Badge> badge.</p>
+        <p style={stepP}>Click <strong style={{color:"#e2e8f0"}}>Save</strong> in Power Automate. It will now trigger automatically on every new submission.</p>
       </Step>
-
-      {/* Step 8 */}
       <Step n="8" title="Field name mapping reference">
-        <p style={{...stepP,marginBottom:10}}>Here's how your Microsoft Forms questions should map to the JSON fields:</p>
-        <table style={{...tableStyle,fontSize:12}}>
-          <thead><tr><th style={thStyle}>JSON Field</th><th style={thStyle}>Your MS Forms Question (example)</th></tr></thead>
-          <tbody>{[
-            ["incidentDate","Date of the incident"],
-            ["title","Brief title of the incident"],
-            ["location","Where did the incident take place?"],
-            ["aircraft","Aircraft registration"],
-            ["picType","Who was PIC? (Instructor / Solo Student / Licence Holder / Other)"],
-            ["operationalArea","Operational area"],
-            ["what","What happened? (factual recap)"],
-            ["reporterDetails","Your name / contact details (optional)"],
-          ].map(([f,q])=>(
+        <table style={{...tableStyle,fontSize:12,marginTop:10}}>
+          <thead><tr><th style={thStyle}>JSON Field</th><th style={thStyle}>Your MS Forms Question</th></tr></thead>
+          <tbody>{[["incidentDate","Date of the incident"],["title","Brief title of the incident"],["location","Where did it take place?"],["aircraft","Aircraft registration"],["picType","Who was PIC?"],["operationalArea","Operational area"],["what","What happened?"],["reporterDetails","Your name / contact (optional)"]].map(([f,q])=>(
             <tr key={f}><td style={{...tdStyle,color:"#38bdf8",fontFamily:"monospace",fontSize:11}}>{f}</td><td style={{...tdStyle,color:"#94a3b8"}}>{q}</td></tr>
           ))}</tbody>
         </table>
@@ -772,7 +856,7 @@ function SimulateWebhook({ webhookSecret, onIncoming }) {
   return (
     <div style={{maxWidth:680,marginTop:40,borderTop:"1px solid #1e293b",paddingTop:32}}>
       <h3 style={{...h2Style,fontSize:16,color:"#a78bfa"}}>🧪 Simulate Incoming Webhook</h3>
-      <p style={{color:"#64748b",fontSize:12,marginBottom:16}}>Manually inject a report as if it came from Power Automate. Use this to test the field mapping before going live.</p>
+      <p style={{color:"#64748b",fontSize:12,marginBottom:16}}>Manually inject a report as if it came from Power Automate.</p>
       {result&&<div style={{background:result.ok?"#14532d":"#450a0a",border:`1px solid ${result.ok?"#22c55e":"#ef4444"}`,borderRadius:8,padding:"10px 14px",marginBottom:14,color:result.ok?"#86efac":"#fca5a5",fontSize:13}}>{result.msg}</div>}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
         <Input label="Webhook Secret ⬅ must match" value={form.secret} onChange={set("secret")} />
@@ -815,6 +899,8 @@ export default function App() {
         loadFromStorage("sms:webhookSecret", "lsa-sms-secret"),
       ]);
       setReports(r); setRisks(ri); setActions(a); setWebhookSecret(s); setReady(true);
+      // Take automatic backup on load
+      takeBackup(r, ri, a);
     })();
   },[]);
 
@@ -831,7 +917,6 @@ export default function App() {
   },[]);
 
   const handleSecretChange = (s) => { setWebhookSecret(s); };
-
   const [raiseTarget, setRaiseTarget] = useState(null);
 
   const raiseToRiskRegister = useCallback((report) => {
@@ -856,6 +941,18 @@ export default function App() {
     });
   }, []);
 
+  const handleRestore = useCallback(async (backup) => {
+    // Take a backup of current state before restoring
+    await takeBackup(reports, risks, actions);
+    setReports(backup.reports);
+    setRisks(backup.risks);
+    setActions(backup.actions);
+    await saveToStorage("sms:reports", backup.reports);
+    await saveToStorage("sms:risks", backup.risks);
+    await saveToStorage("sms:actions", backup.actions);
+    setTab("dashboard");
+  }, [reports, risks, actions]);
+
   if (!ready) return <div style={{minHeight:"100vh",background:"#020617",display:"flex",alignItems:"center",justifyContent:"center",color:"#38bdf8",fontFamily:"sans-serif"}}>Loading SMS data…</div>;
 
   const tabs = [
@@ -865,6 +962,7 @@ export default function App() {
     {id:"rawreports",label:"📋 Raw Reports"},
     {id:"riskregister",label:"⚠ Risk Register"},
     {id:"actionlog",label:"✅ Action Log"},
+    {id:"backups",label:"🔄 Backups"},
   ];
 
   return (
@@ -877,7 +975,7 @@ export default function App() {
           </div>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <div style={{width:8,height:8,borderRadius:"50%",background:"#22c55e",boxShadow:"0 0 6px #22c55e"}}/>
-            <span style={{fontSize:11,color:"#475569"}}>Storage active · {reports?.length} reports</span>
+            <span style={{fontSize:11,color:"#475569"}}>Storage active · {reports?.filter(r=>!r.deletedAt).length} reports</span>
           </div>
         </div>
       </div>
@@ -895,6 +993,7 @@ export default function App() {
         {tab==="rawreports"&&<RawReports reports={reports} onRaise={raiseToRiskRegister} setReports={setReports}/>}
         {tab==="riskregister"&&<RiskRegister risks={risks} setRisks={setRisks} actions={actions} setActions={setActions} raiseTarget={raiseTarget} onRaiseSave={handleRaiseSave} onRaiseCancel={()=>setRaiseTarget(null)}/>}
         {tab==="actionlog"&&<ActionLog actions={actions} setActions={setActions} risks={risks}/>}
+        {tab==="backups"&&<BackupsTab onRestore={handleRestore}/>}
       </div>
     </div>
   );
