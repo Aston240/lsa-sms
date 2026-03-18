@@ -15,7 +15,7 @@ ${JSON.stringify(risks, null, 2)}
 ACTION LOG (${actions.length} actions):
 ${JSON.stringify(actions, null, 2)}
 
-Please provide a comprehensive Safety Review Board briefing. Structure your response as valid JSON with exactly this format:
+Please provide a comprehensive Safety Review Board briefing. Structure your response as valid JSON with exactly this format and nothing else — no preamble, no markdown, just the raw JSON object:
 {
   "executiveSummary": "2-3 paragraph executive summary of the overall safety picture",
   "keyMetrics": {
@@ -27,7 +27,7 @@ Please provide a comprehensive Safety Review Board briefing. Structure your resp
   },
   "trendAnalysis": "Analysis of patterns and trends in the data - what is recurring, what aircraft or operational areas are featuring most, any seasonal patterns",
   "topRisks": [
-    { "id": "risk id", "title": "brief title", "concern": "why this needs board attention", "urgency": "HIGH|MEDIUM|LOW" }
+    { "id": "risk id", "title": "brief title", "concern": "why this needs board attention", "urgency": "HIGH or MEDIUM or LOW" }
   ],
   "overdueItems": [
     { "id": "action id", "description": "brief description", "owner": "owner name", "daysOverdue": number }
@@ -49,16 +49,28 @@ Be direct, professional, and specific. Reference actual data points, specific ha
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-opus-4-5-20251101",
-        max_tokens: 4000,
+        model: "claude-sonnet-4-5",
+        max_tokens: 8000,
         messages: [{ role: "user", content: prompt }],
       }),
     });
 
+    if (!response.ok) {
+      const errText = await response.text();
+      return Response.json({ error: `Anthropic API error: ${response.status} — ${errText}` }, { status: 500 });
+    }
+
     const data = await response.json();
     const text = data.content?.find(b => b.type === "text")?.text || "";
     const clean = text.replace(/```json|```/g, "").trim();
-    const parsed = JSON.parse(clean);
+
+    let parsed;
+    try {
+      parsed = JSON.parse(clean);
+    } catch (parseErr) {
+      return Response.json({ error: `JSON parse failed. Raw response: ${clean.slice(0, 500)}` }, { status: 500 });
+    }
+
     return Response.json({ ok: true, analysis: parsed });
   } catch (err) {
     return Response.json({ error: err.message }, { status: 500 });
