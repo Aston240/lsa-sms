@@ -251,7 +251,7 @@ function RawReports({ reports, onRaise, setReports }) {
       <div style={{overflowX:"auto"}}>
         <table style={tableStyle}>
           <thead><tr>{["ID","Source","Date","Title","Aircraft","Location","PIC Type","Reporter","Status",""].map(h=><th key={h} style={thStyle}>{h}</th>)}</tr></thead>
-          <tbody>{[...filtered].reverse().map(r=>(
+          <tbody>{filtered.map(r=>(
             <tr key={r.id} style={{opacity: r.deletedAt ? 0.6 : 1}}>
               <td style={tdStyle}>{r.id}</td>
               <td style={tdStyle}>{r.source==="forms"?<Badge color="#818cf8">MS Forms</Badge>:r.source==="manual"?<Badge color="#38bdf8">Manual</Badge>:r.source==="excel-import"?<Badge color="#38bdf8">Import</Badge>:<Badge color="#475569">Excel</Badge>}</td>
@@ -362,7 +362,7 @@ function RiskRegister({ risks, setRisks, actions, setActions, raiseTarget, onRai
       <div style={{overflowX:"auto"}}>
         <table style={tableStyle}>
           <thead><tr>{["Hazard ID","Date","Aircraft","Hazard Title","Category","Init. Risk","Residual Risk","Actions","Status","Owner",""].map(h=><th key={h} style={thStyle}>{h}</th>)}</tr></thead>
-          <tbody>{[...filtered].reverse().map(r=>{
+          <tbody>{filtered.map(r=>{
             const score=riskScore(r.initSeverity,r.initLikelihood);const{label,color}=riskLevel(score);
             const resScore = riskScore(r.residualSeverity, r.residualLikelihood);
             const resLevel = resScore > 0 ? riskLevel(resScore) : null;
@@ -516,7 +516,7 @@ function ActionLog({ actions, setActions, risks }) {
       <div style={{overflowX:"auto"}}>
         <table style={tableStyle}>
           <thead><tr>{["Action ID","Hazard ID","Description","Owner","Target Date","Priority","Status","Overdue",""].map(h=><th key={h} style={thStyle}>{h}</th>)}</tr></thead>
-          <tbody>{[...filtered].reverse().map(a=>{const od=isOverdue(a.targetDate,a.status);return(
+          <tbody>{filtered.map(a=>{const od=isOverdue(a.targetDate,a.status);return(
             <tr key={a.id} style={{background:od&&!a.deletedAt?"#450a0a22":undefined, opacity: a.deletedAt ? 0.6 : 1}}>
               <td style={tdStyle}><span style={{color:"#38bdf8",fontWeight:700}}>{a.id}</span></td>
               <td style={tdStyle}><span style={{color:"#a78bfa"}}>{a.hazardId}</span></td>
@@ -759,6 +759,166 @@ function BackupsTab({ onRestore }) {
   );
 }
 
+// ── Export ────────────────────────────────────────────────────────────────────
+function ExportTab({ reports, risks, actions }) {
+  const [exporting, setExporting] = useState(false);
+
+  const doExport = async (activeOnly) => {
+    setExporting(true);
+    try {
+      const { utils, writeFile } = await import("xlsx");
+
+      const r = activeOnly ? reports.filter(x => !x.deletedAt) : reports;
+      const ri = activeOnly ? risks.filter(x => !x.deletedAt) : risks;
+      const a = activeOnly ? actions.filter(x => !x.deletedAt) : actions;
+
+      // Reports sheet
+      const reportRows = r.map(x => ({
+        "ID": x.id,
+        "Submitted At": x.submittedAt ? new Date(x.submittedAt).toLocaleString("en-GB") : "",
+        "Incident Date": x.incidentDate ? new Date(x.incidentDate).toLocaleDateString("en-GB") : "",
+        "Title": x.title,
+        "Location": x.location,
+        "Aircraft": x.aircraft,
+        "PIC Type": x.picType,
+        "Operational Area": x.operationalArea,
+        "What Happened": x.what,
+        "Reporter Details": x.reporterDetails,
+        "Source": x.source,
+        "Acknowledged": x.acknowledged ? "Yes" : "No",
+        "Deleted": x.deletedAt ? new Date(x.deletedAt).toLocaleString("en-GB") : "",
+      }));
+
+      // Risk Register sheet
+      const riskRows = ri.map(x => ({
+        "Hazard ID": x.id,
+        "Report ID": x.reportId,
+        "Date Identified": x.dateIdentified ? new Date(x.dateIdentified).toLocaleDateString("en-GB") : "",
+        "Aircraft": x.aircraft,
+        "PIC Type": x.picType,
+        "Location": x.location,
+        "Operational Area": x.operationalArea,
+        "Hazard Description": x.hazardDescription,
+        "Hazard Category": x.hazardCategory,
+        "Potential Consequence": x.potentialConsequence,
+        "Initial Severity": x.initSeverity,
+        "Initial Likelihood": x.initLikelihood,
+        "Initial Risk Score": (x.initSeverity||0) * (x.initLikelihood||0),
+        "Existing Controls": x.existingControls,
+        "Additional Mitigation": x.additionalMitigation,
+        "Action Owner": x.actionOwner,
+        "Target Date": x.targetDate ? new Date(x.targetDate).toLocaleDateString("en-GB") : "",
+        "Status": x.status,
+        "Date Implemented": x.dateImplemented ? new Date(x.dateImplemented).toLocaleDateString("en-GB") : "",
+        "Residual Severity": x.residualSeverity || "",
+        "Residual Likelihood": x.residualLikelihood || "",
+        "Residual Risk Score": x.residualSeverity && x.residualLikelihood ? x.residualSeverity * x.residualLikelihood : "",
+        "Monitoring Method": x.monitoringMethod,
+        "Deleted": x.deletedAt ? new Date(x.deletedAt).toLocaleString("en-GB") : "",
+      }));
+
+      // Action Log sheet
+      const actionRows = a.map(x => ({
+        "Action ID": x.id,
+        "Hazard ID": x.hazardId,
+        "Description": x.description,
+        "Owner": x.owner,
+        "Target Date": x.targetDate ? new Date(x.targetDate).toLocaleDateString("en-GB") : "",
+        "Priority": x.priority,
+        "Status": x.status,
+        "Evidence / Closure Notes": x.evidence,
+        "Closed Date": x.closedDate ? new Date(x.closedDate).toLocaleDateString("en-GB") : "",
+        "Overdue": x.status !== "Closed" && x.targetDate && new Date(x.targetDate) < new Date() ? "Yes" : "No",
+        "Deleted": x.deletedAt ? new Date(x.deletedAt).toLocaleString("en-GB") : "",
+      }));
+
+      const wb = utils.book_new();
+      utils.book_append_sheet(wb, utils.json_to_sheet(reportRows), "Raw Reports");
+      utils.book_append_sheet(wb, utils.json_to_sheet(riskRows), "Risk Register");
+      utils.book_append_sheet(wb, utils.json_to_sheet(actionRows), "Action Log");
+
+      const date = new Date().toLocaleDateString("en-GB").replace(/\//g, "-");
+      const filename = `LSA-SMS-Export-${activeOnly ? "Active" : "Full"}-${date}.xlsx`;
+      writeFile(wb, filename);
+    } catch (err) {
+      alert("Export failed: " + err.message);
+    }
+    setExporting(false);
+  };
+
+  const activeReports = reports.filter(r => !r.deletedAt);
+  const activeRisks = risks.filter(r => !r.deletedAt);
+  const activeActions = actions.filter(a => !a.deletedAt);
+
+  return (
+    <div style={{maxWidth:680}}>
+      <h2 style={h2Style}>📤 Export Data</h2>
+      <p style={{color:"#64748b",fontSize:13,marginBottom:32}}>
+        Download all SMS data as an Excel file with three sheets — Reports, Risk Register, and Action Log.
+        Use the Active export for manager meetings and the Full export for backup purposes.
+      </p>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+        {/* Active Export */}
+        <div style={{background:"#0f172a",border:"1px solid #22c55e33",borderRadius:12,padding:24}}>
+          <div style={{fontSize:28,marginBottom:8}}>📊</div>
+          <div style={{fontSize:15,fontWeight:700,color:"#e2e8f0",marginBottom:6}}>Active Records</div>
+          <div style={{fontSize:12,color:"#64748b",marginBottom:16}}>For manager meetings and quarterly analysis. Excludes deleted items.</div>
+          <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:20}}>
+            {[
+              {label:"Reports", count: activeReports.length, color:"#38bdf8"},
+              {label:"Risks", count: activeRisks.length, color:"#a78bfa"},
+              {label:"Actions", count: activeActions.length, color:"#22c55e"},
+            ].map(({label,count,color})=>(
+              <div key={label} style={{display:"flex",justifyContent:"space-between",fontSize:12}}>
+                <span style={{color:"#64748b"}}>{label}</span>
+                <span style={{color,fontWeight:700}}>{count} records</span>
+              </div>
+            ))}
+          </div>
+          <button
+            onClick={()=>doExport(true)}
+            disabled={exporting}
+            style={{...btnPrimary,width:"100%",background:"#22c55e",fontSize:13}}
+          >
+            {exporting ? "Exporting…" : "⬇ Download Active Export"}
+          </button>
+        </div>
+
+        {/* Full Export */}
+        <div style={{background:"#0f172a",border:"1px solid #38bdf833",borderRadius:12,padding:24}}>
+          <div style={{fontSize:28,marginBottom:8}}>🗄️</div>
+          <div style={{fontSize:15,fontWeight:700,color:"#e2e8f0",marginBottom:6}}>Full Backup Export</div>
+          <div style={{fontSize:12,color:"#64748b",marginBottom:16}}>Complete data including deleted items. Use for archiving and full backup.</div>
+          <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:20}}>
+            {[
+              {label:"Reports", count: reports.length, color:"#38bdf8"},
+              {label:"Risks", count: risks.length, color:"#a78bfa"},
+              {label:"Actions", count: actions.length, color:"#22c55e"},
+            ].map(({label,count,color})=>(
+              <div key={label} style={{display:"flex",justifyContent:"space-between",fontSize:12}}>
+                <span style={{color:"#64748b"}}>{label}</span>
+                <span style={{color,fontWeight:700}}>{count} records</span>
+              </div>
+            ))}
+          </div>
+          <button
+            onClick={()=>doExport(false)}
+            disabled={exporting}
+            style={{...btnPrimary,width:"100%",fontSize:13}}
+          >
+            {exporting ? "Exporting…" : "⬇ Download Full Export"}
+          </button>
+        </div>
+      </div>
+
+      <div style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:10,padding:"14px 18px",marginTop:24,fontSize:12,color:"#475569"}}>
+        💡 Files are named automatically with today's date, e.g. <span style={{color:"#94a3b8",fontFamily:"monospace"}}>LSA-SMS-Export-Active-18-03-2026.xlsx</span>
+      </div>
+    </div>
+  );
+}
+
 // ── MS Forms Integration Guide ────────────────────────────────────────────────
 function IntegrationGuide({ webhookSecret, onSecretChange }) {
   const [copied, setCopied] = useState(null);
@@ -963,6 +1123,7 @@ export default function App() {
     {id:"riskregister",label:"⚠ Risk Register"},
     {id:"actionlog",label:"✅ Action Log"},
     {id:"backups",label:"🔄 Backups"},
+    {id:"export",label:"📤 Export"},
   ];
 
   return (
@@ -994,6 +1155,7 @@ export default function App() {
         {tab==="riskregister"&&<RiskRegister risks={risks} setRisks={setRisks} actions={actions} setActions={setActions} raiseTarget={raiseTarget} onRaiseSave={handleRaiseSave} onRaiseCancel={()=>setRaiseTarget(null)}/>}
         {tab==="actionlog"&&<ActionLog actions={actions} setActions={setActions} risks={risks}/>}
         {tab==="backups"&&<BackupsTab onRestore={handleRestore}/>}
+        {tab==="export"&&<ExportTab reports={reports} risks={risks} actions={actions}/>}
       </div>
     </div>
   );
