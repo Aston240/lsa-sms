@@ -8,6 +8,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "docx": "^8.5.0",
     "next": "16.0.7",
     "react": "^18",
     "react-dom": "^18",
