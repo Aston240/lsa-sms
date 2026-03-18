@@ -982,20 +982,14 @@ Please provide a comprehensive Safety Review Board briefing. Structure your resp
 Be direct, professional, and specific. Reference actual data points, specific hazard IDs, aircraft registrations, and dates where relevant. Do not be generic. Think like a CAA safety inspector who has seen what goes wrong at flying schools.`;
 
     try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
+      const response = await fetch("/api/analysis", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 4000,
-          messages: [{ role: "user", content: prompt }],
-        }),
+        body: JSON.stringify({ reports: activeReports, risks: activeRisks, actions: activeActions }),
       });
       const data = await response.json();
-      const text = data.content?.find(b => b.type === "text")?.text || "";
-      const clean = text.replace(/```json|```/g, "").trim();
-      const parsed = JSON.parse(clean);
-      setAnalysis(parsed);
+      if (!data.ok) throw new Error(data.error || "Unknown error");
+      setAnalysis(data.analysis);
       setGeneratedAt(new Date());
     } catch (err) {
       setError("Failed to generate analysis. Please try again. (" + err.message + ")");
