@@ -919,6 +919,268 @@ function ExportTab({ reports, risks, actions }) {
   );
 }
 
+// ── AI Analysis ───────────────────────────────────────────────────────────────
+function AIAnalysis({ reports, risks, actions }) {
+  const [analysis, setAnalysis] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [generatedAt, setGeneratedAt] = useState(null);
+
+  const activeReports = reports.filter(r => !r.deletedAt);
+  const activeRisks = risks.filter(r => !r.deletedAt);
+  const activeActions = actions.filter(a => !a.deletedAt);
+
+  const generate = async () => {
+    setLoading(true);
+    setError(null);
+    setAnalysis(null);
+
+    const dataPayload = {
+      generatedAt: new Date().toISOString(),
+      reports: activeReports,
+      risks: activeRisks,
+      actions: activeActions,
+    };
+
+    const prompt = `You are a General Aviation safety expert with 25 years of experience in aviation safety management, regulatory compliance, and risk assessment. You are presenting to a Safety Review Board for a GA flying school (LS Airmotive) based at Oxford Airport (EGTK).
+
+Here is the complete SMS data for this organisation:
+
+REPORTS (${activeReports.length} total):
+${JSON.stringify(activeReports, null, 2)}
+
+RISK REGISTER (${activeRisks.length} entries):
+${JSON.stringify(activeRisks, null, 2)}
+
+ACTION LOG (${activeActions.length} actions):
+${JSON.stringify(activeActions, null, 2)}
+
+Please provide a comprehensive Safety Review Board briefing. Structure your response as valid JSON with exactly this format:
+{
+  "executiveSummary": "2-3 paragraph executive summary of the overall safety picture",
+  "keyMetrics": {
+    "totalReports": number,
+    "pendingReview": number,
+    "openHighRisks": number,
+    "overdueActions": number,
+    "closedRisks": number
+  },
+  "trendAnalysis": "Analysis of patterns and trends in the data - what is recurring, what aircraft or operational areas are featuring most, any seasonal patterns",
+  "topRisks": [
+    { "id": "risk id", "title": "brief title", "concern": "why this needs board attention", "urgency": "HIGH|MEDIUM|LOW" }
+  ],
+  "overdueItems": [
+    { "id": "action id", "description": "brief description", "owner": "owner name", "daysOverdue": number }
+  ],
+  "discussionPoints": [
+    { "title": "Discussion point title", "detail": "Full detail for board discussion", "recommendation": "Specific recommended action" }
+  ],
+  "positives": ["List of positive safety indicators or improvements noted"],
+  "conclusion": "Closing paragraph summarising the safety position and priority actions for the board to authorise"
+}
+
+Be direct, professional, and specific. Reference actual data points, specific hazard IDs, aircraft registrations, and dates where relevant. Do not be generic. Think like a CAA safety inspector who has seen what goes wrong at flying schools.`;
+
+    try {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 4000,
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+      const data = await response.json();
+      const text = data.content?.find(b => b.type === "text")?.text || "";
+      const clean = text.replace(/```json|```/g, "").trim();
+      const parsed = JSON.parse(clean);
+      setAnalysis(parsed);
+      setGeneratedAt(new Date());
+    } catch (err) {
+      setError("Failed to generate analysis. Please try again. (" + err.message + ")");
+    }
+    setLoading(false);
+  };
+
+  const downloadWord = async () => {
+    if (!analysis) return;
+    try {
+      const response = await fetch("/api/analysis-doc", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ analysis, generatedAt: generatedAt?.toISOString() }),
+      });
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `LSA-SMS-Safety-Review-${new Date().toLocaleDateString("en-GB").replace(/\//g,"-")}.docx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert("Word download failed: " + err.message);
+    }
+  };
+
+  const urgencyColor = u => u === "HIGH" ? "#ef4444" : u === "MEDIUM" ? "#f59e0b" : "#22c55e";
+
+  return (
+    <div style={{maxWidth:900}}>
+      <h2 style={h2Style}>🤖 AI Safety Analysis</h2>
+      <p style={{color:"#64748b",fontSize:13,marginBottom:24}}>
+        Generate a comprehensive safety briefing from your live SMS data, presented by an AI safety expert with 25 years of GA experience. Suitable for Safety Review Board meetings.
+      </p>
+
+      <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:32,flexWrap:"wrap"}}>
+        <button onClick={generate} disabled={loading} style={{...btnPrimary, background: loading ? "#1e293b" : "#7c3aed", fontSize:14, padding:"12px 28px"}}>
+          {loading ? "⏳ Generating Analysis…" : "🤖 Generate Safety Review"}
+        </button>
+        {analysis && (
+          <button onClick={downloadWord} style={{...btnSecondary, fontSize:13}}>
+            📄 Download Word Document
+          </button>
+        )}
+        {generatedAt && <span style={{fontSize:11,color:"#475569"}}>Generated {generatedAt.toLocaleTimeString("en-GB")}</span>}
+      </div>
+
+      {loading && (
+        <div style={{background:"#0f172a",border:"1px solid #7c3aed44",borderRadius:10,padding:32,textAlign:"center"}}>
+          <div style={{fontSize:32,marginBottom:12}}>✈️</div>
+          <div style={{color:"#a78bfa",fontSize:14,fontWeight:600}}>Analysing your safety data…</div>
+          <div style={{color:"#475569",fontSize:12,marginTop:8}}>The AI is reviewing all reports, risks and actions as a GA safety expert</div>
+        </div>
+      )}
+
+      {error && (
+        <div style={{background:"#450a0a",border:"1px solid #ef4444",borderRadius:8,padding:"14px 18px",color:"#fca5a5",fontSize:13}}>{error}</div>
+      )}
+
+      {analysis && (
+        <div style={{display:"flex",flexDirection:"column",gap:20}}>
+
+          {/* Executive Summary */}
+          <div style={cardStyle}>
+            <div style={cardHead}>Executive Summary</div>
+            <p style={{color:"#94a3b8",fontSize:13,lineHeight:1.7,margin:0}}>{analysis.executiveSummary}</p>
+          </div>
+
+          {/* Key Metrics */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12}}>
+            {[
+              {label:"Total Reports",value:analysis.keyMetrics?.totalReports,color:"#38bdf8"},
+              {label:"Pending Review",value:analysis.keyMetrics?.pendingReview,color:"#f59e0b"},
+              {label:"High/Intolerable Risks",value:analysis.keyMetrics?.openHighRisks,color:"#ef4444"},
+              {label:"Overdue Actions",value:analysis.keyMetrics?.overdueActions,color:"#ef4444"},
+              {label:"Closed Risks",value:analysis.keyMetrics?.closedRisks,color:"#22c55e"},
+            ].map(k=>(
+              <div key={k.label} style={{background:"#0f172a",border:`1px solid ${k.color}33`,borderRadius:10,padding:"14px 16px",textAlign:"center"}}>
+                <div style={{fontSize:28,fontWeight:800,color:k.color,fontFamily:"'Bebas Neue',sans-serif",lineHeight:1}}>{k.value ?? "—"}</div>
+                <div style={{fontSize:10,color:"#64748b",marginTop:4,textTransform:"uppercase",letterSpacing:".5px"}}>{k.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Trend Analysis */}
+          <div style={cardStyle}>
+            <div style={cardHead}>Trend Analysis</div>
+            <p style={{color:"#94a3b8",fontSize:13,lineHeight:1.7,margin:0}}>{analysis.trendAnalysis}</p>
+          </div>
+
+          {/* Top Risks */}
+          {analysis.topRisks?.length > 0 && (
+            <div style={cardStyle}>
+              <div style={cardHead}>Risks Requiring Board Attention</div>
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {analysis.topRisks.map((r,i)=>(
+                  <div key={i} style={{borderLeft:`3px solid ${urgencyColor(r.urgency)}`,paddingLeft:14,paddingTop:4,paddingBottom:4}}>
+                    <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:4}}>
+                      <span style={{color:"#38bdf8",fontWeight:700,fontSize:12}}>{r.id}</span>
+                      <Badge color={urgencyColor(r.urgency)}>{r.urgency}</Badge>
+                      <span style={{color:"#e2e8f0",fontSize:13,fontWeight:600}}>{r.title}</span>
+                    </div>
+                    <p style={{color:"#94a3b8",fontSize:12,margin:0,lineHeight:1.6}}>{r.concern}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Overdue Items */}
+          {analysis.overdueItems?.length > 0 && (
+            <div style={cardStyle}>
+              <div style={cardHead}>⚠ Overdue Actions</div>
+              <div style={{overflowX:"auto"}}>
+                <table style={tableStyle}>
+                  <thead><tr>{["Action ID","Description","Owner","Days Overdue"].map(h=><th key={h} style={thStyle}>{h}</th>)}</tr></thead>
+                  <tbody>{analysis.overdueItems.map((a,i)=>(
+                    <tr key={i}>
+                      <td style={{...tdStyle,color:"#38bdf8",fontWeight:700}}>{a.id}</td>
+                      <td style={{...tdStyle,maxWidth:320}}>{a.description}</td>
+                      <td style={tdStyle}>{a.owner}</td>
+                      <td style={tdStyle}><Badge color="#ef4444">{a.daysOverdue} days</Badge></td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Discussion Points */}
+          {analysis.discussionPoints?.length > 0 && (
+            <div style={cardStyle}>
+              <div style={cardHead}>Board Discussion Points</div>
+              <div style={{display:"flex",flexDirection:"column",gap:16}}>
+                {analysis.discussionPoints.map((d,i)=>(
+                  <div key={i} style={{background:"#020617",borderRadius:8,padding:"14px 16px"}}>
+                    <div style={{fontSize:13,fontWeight:700,color:"#e2e8f0",marginBottom:6}}>
+                      <span style={{color:"#38bdf8",marginRight:8}}>{i+1}.</span>{d.title}
+                    </div>
+                    <p style={{color:"#94a3b8",fontSize:12,margin:"0 0 8px",lineHeight:1.6}}>{d.detail}</p>
+                    <div style={{background:"#0f172a",borderRadius:6,padding:"8px 12px",fontSize:12,color:"#22c55e"}}>
+                      <strong>Recommendation:</strong> {d.recommendation}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Positives */}
+          {analysis.positives?.length > 0 && (
+            <div style={cardStyle}>
+              <div style={cardHead}>✓ Positive Indicators</div>
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {analysis.positives.map((p,i)=>(
+                  <div key={i} style={{display:"flex",gap:10,fontSize:13,color:"#94a3b8"}}>
+                    <span style={{color:"#22c55e",fontWeight:700,flexShrink:0}}>✓</span>
+                    <span>{p}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Conclusion */}
+          <div style={{...cardStyle,border:"1px solid #7c3aed44"}}>
+            <div style={cardHead}>Conclusion & Priority Actions</div>
+            <p style={{color:"#94a3b8",fontSize:13,lineHeight:1.7,margin:0}}>{analysis.conclusion}</p>
+          </div>
+
+          {/* Download button at bottom */}
+          <div style={{display:"flex",gap:12,paddingBottom:32}}>
+            <button onClick={downloadWord} style={{...btnPrimary,background:"#7c3aed"}}>
+              📄 Download Word Document
+            </button>
+            <button onClick={generate} style={btnSecondary}>🔄 Regenerate</button>
+          </div>
+
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── MS Forms Integration Guide ────────────────────────────────────────────────
 function IntegrationGuide({ webhookSecret, onSecretChange }) {
   const [copied, setCopied] = useState(null);
@@ -1124,6 +1386,7 @@ export default function App() {
     {id:"actionlog",label:"✅ Action Log"},
     {id:"backups",label:"🔄 Backups"},
     {id:"export",label:"📤 Export"},
+    {id:"analysis",label:"🤖 AI Analysis"},
   ];
 
   return (
@@ -1156,6 +1419,7 @@ export default function App() {
         {tab==="actionlog"&&<ActionLog actions={actions} setActions={setActions} risks={risks}/>}
         {tab==="backups"&&<BackupsTab onRestore={handleRestore}/>}
         {tab==="export"&&<ExportTab reports={reports} risks={risks} actions={actions}/>}
+        {tab==="analysis"&&<AIAnalysis reports={reports} risks={risks} actions={actions}/>}
       </div>
     </div>
   );
