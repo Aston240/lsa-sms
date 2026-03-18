@@ -45,7 +45,7 @@ Be direct, professional, and specific. Reference actual data points, specific ha
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-      "x-api-key": "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",
+      "x-api-key": "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",
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
