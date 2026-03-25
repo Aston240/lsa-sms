@@ -2,7 +2,7 @@ import { createClient } from 'redis';
 
 const REDIS_URL = 'redis://default:cxNPTRSnRKZinIQXsYAMKa7t5AM1rHV4@redis-17938.crce204.eu-west-2-3.ec2.cloud.redislabs.com:17938';
 // Replace with your deployed GAS web app URL
-const GAS_URL = 'https://script.google.com/macros/s/YOUR_GAS_DEPLOYMENT_ID/exec';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbwALEoxHEjo4_ME6w_-wB-mdvCPBhXz7lHlVcC5xlCDI0Vd0z08KKiGHUZxmPtsK6G3/exec';
 
 function randomToken() {
   return Array.from(crypto.getRandomValues(new Uint8Array(32)))
