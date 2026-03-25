@@ -1,3 +1,4 @@
+// PATH: app/sms/page.jsx
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
@@ -1023,6 +1024,138 @@ Be direct, professional, and specific. Reference actual data points, specific ha
   );
 }
 
+// ── Team Members ─────────────────────────────────────────────────────────────
+function TeamMembers({ team, setTeam, actions }) {
+  const blank = { name: "", email: "" };
+  const [form, setForm] = useState(blank);
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState(blank);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [saved, setSaved] = useState(false);
+
+  const activeActions = actions.filter(a => !a.deletedAt && a.status !== "Closed");
+
+  const addMember = () => {
+    if (!form.name.trim() || !form.email.trim()) return alert("Please enter both a name and email address.");
+    if (!/\S+@\S+\.\S+/.test(form.email)) return alert("Please enter a valid email address.");
+    const newMember = { id: Date.now(), name: form.name.trim(), email: form.email.trim() };
+    setTeam(prev => [...(prev||[]), newMember]);
+    setForm(blank);
+    setSaved(true); setTimeout(() => setSaved(false), 2000);
+  };
+
+  const startEdit = (member) => {
+    setEditingId(member.id);
+    setEditForm({ name: member.name, email: member.email });
+  };
+
+  const saveEdit = (id) => {
+    if (!editForm.name.trim() || !editForm.email.trim()) return alert("Please enter both a name and email address.");
+    if (!/\S+@\S+\.\S+/.test(editForm.email)) return alert("Please enter a valid email address.");
+    setTeam(prev => prev.map(m => m.id === id ? { ...m, name: editForm.name.trim(), email: editForm.email.trim() } : m));
+    setEditingId(null);
+  };
+
+  const doDelete = (id) => {
+    setTeam(prev => prev.filter(m => m.id !== id));
+    setConfirmDelete(null);
+  };
+
+  const getMemberActions = (name) => activeActions.filter(a => a.owner === name);
+  const getOverdue = (name) => activeActions.filter(a => a.owner === name && isOverdue(a.targetDate, a.status));
+
+  return (
+    <div style={{maxWidth:780}}>
+      {confirmDelete && (
+        <div style={{position:"fixed",inset:0,background:"#00000088",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div style={{background:"#0f172a",border:"1px solid #ef4444",borderRadius:10,padding:28,maxWidth:400,width:"90%"}}>
+            <div style={{fontSize:16,fontWeight:700,color:"#e2e8f0",marginBottom:8}}>Remove Team Member?</div>
+            <div style={{fontSize:13,color:"#94a3b8",marginBottom:20}}>Remove <strong style={{color:"#38bdf8"}}>{confirmDelete.name}</strong> from the team? They will no longer receive email notifications.</div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>doDelete(confirmDelete.id)} style={{...btnPrimary,background:"#ef4444"}}>Yes, Remove</button>
+              <button onClick={()=>setConfirmDelete(null)} style={btnSecondary}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <h2 style={h2Style}>👥 Team Members</h2>
+      <p style={{color:"#64748b",fontSize:13,marginBottom:24}}>
+        Manage the people who can be assigned actions. Their email addresses are used to send weekly summaries and overdue notifications via Google Apps Script.
+      </p>
+
+      {/* Add new member */}
+      <div style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:10,padding:"20px",marginBottom:24}}>
+        <div style={{fontSize:12,fontWeight:700,color:"#475569",letterSpacing:"1px",textTransform:"uppercase",marginBottom:14}}>Add New Member</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:12,alignItems:"end"}}>
+          <div>
+            <label style={{fontSize:11,fontWeight:700,color:"#94a3b8",letterSpacing:".8px",textTransform:"uppercase",display:"block",marginBottom:4}}>Full Name</label>
+            <input value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} placeholder="e.g. Tom Newell" style={inputStyle} onKeyDown={e=>e.key==="Enter"&&addMember()} />
+          </div>
+          <div>
+            <label style={{fontSize:11,fontWeight:700,color:"#94a3b8",letterSpacing:".8px",textTransform:"uppercase",display:"block",marginBottom:4}}>Email Address</label>
+            <input value={form.email} onChange={e=>setForm(f=>({...f,email:e.target.value}))} placeholder="e.g. tom@lsairmotive.co.uk" style={inputStyle} onKeyDown={e=>e.key==="Enter"&&addMember()} />
+          </div>
+          <button onClick={addMember} style={{...btnPrimary,whiteSpace:"nowrap"}}>＋ Add</button>
+        </div>
+        {saved && <div style={{fontSize:12,color:"#22c55e",marginTop:10}}>✓ Member added and saved.</div>}
+      </div>
+
+      {/* Team list */}
+      {(!team||team.length===0) ? (
+        <div style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:10,padding:24,color:"#475569",fontSize:13,textAlign:"center"}}>
+          No team members yet. Add someone above to get started.
+        </div>
+      ) : (
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {team.map(member => {
+            const memberActions = getMemberActions(member.name);
+            const overdue = getOverdue(member.name);
+            const isEditing = editingId === member.id;
+            return (
+              <div key={member.id} style={{background:"#0f172a",border:`1px solid ${overdue.length>0?"#ef444433":"#1e293b"}`,borderRadius:10,padding:"16px 20px"}}>
+                {isEditing ? (
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto auto",gap:10,alignItems:"center"}}>
+                    <input value={editForm.name} onChange={e=>setEditForm(f=>({...f,name:e.target.value}))} style={inputStyle} />
+                    <input value={editForm.email} onChange={e=>setEditForm(f=>({...f,email:e.target.value}))} style={inputStyle} />
+                    <button onClick={()=>saveEdit(member.id)} style={{...btnSmall,background:"#22c55e22",color:"#22c55e",border:"1px solid #22c55e44"}}>✓ Save</button>
+                    <button onClick={()=>setEditingId(null)} style={btnSmall}>✕</button>
+                  </div>
+                ) : (
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+                    <div>
+                      <div style={{fontSize:14,fontWeight:700,color:"#e2e8f0",marginBottom:4}}>{member.name}</div>
+                      <div style={{fontSize:12,color:"#64748b"}}>{member.email}</div>
+                      <div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
+                        {memberActions.length > 0
+                          ? <Badge color="#38bdf8">{memberActions.length} open action{memberActions.length!==1?"s":""}</Badge>
+                          : <span style={{fontSize:11,color:"#475569"}}>No open actions</span>
+                        }
+                        {overdue.length > 0 && <Badge color="#ef4444">{overdue.length} overdue</Badge>}
+                      </div>
+                    </div>
+                    <div style={{display:"flex",gap:8}}>
+                      <button onClick={()=>startEdit(member)} style={btnSmall}>Edit</button>
+                      <button onClick={()=>setConfirmDelete(member)} style={{...btnSmall,background:"#ef444422",color:"#ef4444",border:"1px solid #ef444444"}}>🗑</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Info box */}
+      <div style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:10,padding:"14px 18px",marginTop:24,fontSize:12,color:"#475569",lineHeight:1.7}}>
+        💡 <strong style={{color:"#94a3b8"}}>Email notifications</strong> are sent via Google Apps Script using lsaops814@gmail.com.
+        Weekly summaries go out every Sunday at 8pm. Overdue chasers go out daily until the action is closed.
+        Names here must exactly match the action owner names in the Action Log for matching to work.
+      </div>
+    </div>
+  );
+}
+
 // ── MS Forms Integration Guide ────────────────────────────────────────────────
 function IntegrationGuide({ webhookSecret, onSecretChange }) {
   const [copied, setCopied] = useState(null);
@@ -1151,18 +1284,20 @@ export default function App() {
   const [reports, setReports] = useState(null);
   const [risks, setRisks] = useState(null);
   const [actions, setActions] = useState(null);
+  const [team, setTeam] = useState(null);
   const [webhookSecret, setWebhookSecret] = useState("lsa-sms-secret");
   const [ready, setReady] = useState(false);
 
   useEffect(()=>{
     (async()=>{
-      const [r,ri,a,s] = await Promise.all([
+      const [r,ri,a,s,t] = await Promise.all([
         loadFromStorage("sms:reports", SEED_REPORTS),
         loadFromStorage("sms:risks", SEED_RISKS),
         loadFromStorage("sms:actions", SEED_ACTIONS),
         loadFromStorage("sms:webhookSecret", "lsa-sms-secret"),
+        loadFromStorage("sms:team", []),
       ]);
-      setReports(r); setRisks(ri); setActions(a); setWebhookSecret(s); setReady(true);
+      setReports(r); setRisks(ri); setActions(a); setWebhookSecret(s); setTeam(t); setReady(true);
       // Take automatic backup on load
       takeBackup(r, ri, a);
     })();
@@ -1171,6 +1306,7 @@ export default function App() {
   useEffect(()=>{ if(reports) saveToStorage("sms:reports", reports); },[reports]);
   useEffect(()=>{ if(risks) saveToStorage("sms:risks", risks); },[risks]);
   useEffect(()=>{ if(actions) saveToStorage("sms:actions", actions); },[actions]);
+  useEffect(()=>{ if(team) saveToStorage("sms:team", team); },[team]);
   useEffect(()=>{ saveToStorage("sms:webhookSecret", webhookSecret); },[webhookSecret]);
 
   const addReport = useCallback((form)=>{
@@ -1229,6 +1365,7 @@ export default function App() {
     {id:"backups",label:"🔄 Backups"},
     {id:"export",label:"📤 Export"},
     {id:"analysis",label:"🤖 AI Analysis"},
+    {id:"team",label:"👥 Team Members"},
   ];
 
   return (
@@ -1262,6 +1399,7 @@ export default function App() {
         {tab==="backups"&&<BackupsTab onRestore={handleRestore}/>}
         {tab==="export"&&<ExportTab reports={reports} risks={risks} actions={actions}/>}
         {tab==="analysis"&&<AIAnalysis reports={reports} risks={risks} actions={actions}/>}
+        {tab==="team"&&<TeamMembers team={team} setTeam={setTeam} actions={actions}/>}
       </div>
     </div>
   );
