@@ -1598,13 +1598,17 @@ export default function App() {
   }, []);
 
   const handleRaiseSave = useCallback((newRisk) => {
-    let newRiskId;
+    // Calculate the new risk ID synchronously from current risks state
+    const newRiskId = "LS-SMS-" + String(Math.max(...risks.map(r => parseInt(r.id.split("-")[2] || 0)), 0) + 1).padStart(3, "0");
+    const risk = { ...newRisk, id: newRiskId };
+
+    // Save the risk
     setRisks(prev => {
-      newRiskId = "LS-SMS-" + String(Math.max(...prev.map(r => parseInt(r.id.split("-")[2] || 0)), 0) + 1).padStart(3, "0");
-      const risk = { ...newRisk, id: newRiskId };
       onAudit("RISK_CREATED", "Risk Register", `Created risk ${newRiskId} from report #${raiseTarget.id}: ${newRisk.hazardDescription?.slice(0, 60)}`, newRiskId);
       return [...prev, risk];
     });
+
+    // Save any AI-selected actions, linked to the new risk ID
     const selectedActions = raiseTarget._selectedActions;
     if (selectedActions?.length > 0) {
       setActions(prev => {
@@ -1618,10 +1622,11 @@ export default function App() {
         return [...prev, ...newActions];
       });
     }
+
     setReports(prev => prev.map(r => r.id === raiseTarget.id ? { ...r, acknowledged: true } : r));
     onAudit("REPORT_ACKNOWLEDGED", "Raw Reports", `Acknowledged report #${raiseTarget.id}: ${raiseTarget.title}`, String(raiseTarget.id));
     setRaiseTarget(null);
-  }, [raiseTarget, onAudit]);
+  }, [risks, raiseTarget, onAudit]);
 
   const importReports = useCallback((newOnes) => {
     setReports(prev => {
