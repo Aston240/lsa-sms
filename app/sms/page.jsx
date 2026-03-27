@@ -1598,12 +1598,26 @@ export default function App() {
   }, []);
 
   const handleRaiseSave = useCallback((newRisk) => {
+    let newRiskId;
     setRisks(prev => {
-      const nextId = "LS-SMS-" + String(Math.max(...prev.map(r => parseInt(r.id.split("-")[2] || 0)), 0) + 1).padStart(3, "0");
-      const risk = { ...newRisk, id: nextId };
-      onAudit("RISK_CREATED", "Risk Register", `Created risk ${nextId} from report #${raiseTarget.id}: ${newRisk.hazardDescription?.slice(0, 60)}`, nextId);
+      newRiskId = "LS-SMS-" + String(Math.max(...prev.map(r => parseInt(r.id.split("-")[2] || 0)), 0) + 1).padStart(3, "0");
+      const risk = { ...newRisk, id: newRiskId };
+      onAudit("RISK_CREATED", "Risk Register", `Created risk ${newRiskId} from report #${raiseTarget.id}: ${newRisk.hazardDescription?.slice(0, 60)}`, newRiskId);
       return [...prev, risk];
     });
+    const selectedActions = raiseTarget._selectedActions;
+    if (selectedActions?.length > 0) {
+      setActions(prev => {
+        const nums = prev.map(a => parseInt((a.id || "ACT-000").split("-")[1] || 0));
+        let nextNum = (nums.length ? Math.max(...nums) : 0) + 1;
+        const newActions = selectedActions.map(action => {
+          const id = "ACT-" + String(nextNum++).padStart(3, "0");
+          onAudit("ACTION_CREATED", "Action Log", `AI-suggested action ${id}: ${action.description?.slice(0, 60)}`, id);
+          return { id, hazardId: newRiskId, description: action.description, owner: action.owner, priority: action.priority, status: "Open", targetDate: "", evidence: "", closedDate: "" };
+        });
+        return [...prev, ...newActions];
+      });
+    }
     setReports(prev => prev.map(r => r.id === raiseTarget.id ? { ...r, acknowledged: true } : r));
     onAudit("REPORT_ACKNOWLEDGED", "Raw Reports", `Acknowledged report #${raiseTarget.id}: ${raiseTarget.title}`, String(raiseTarget.id));
     setRaiseTarget(null);
