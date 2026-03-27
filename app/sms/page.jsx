@@ -597,7 +597,7 @@ function RawReports({ reports, risks, onRaise, setReports, currentUser, onAudit 
                         {isAdmin && (
                           <button onClick={() => setOpenAiPanel(prev => prev === r.id ? null : r.id)} style={{ ...btnSmall, background: openAiPanel === r.id ? "#7c3aed33" : "#1e293b", color: openAiPanel === r.id ? "#a78bfa" : "#94a3b8", border: openAiPanel === r.id ? "1px solid #7c3aed55" : "1px solid #334155" }}>🤖</button>
                         )}
-                        {!r.acknowledged && <button onClick={() => handleRaise(r)} style={{ ...btnSmall, background: "#0ea5e933", color: "#38bdf8", border: "1px solid #0ea5e955" }}>↗ Raise</button>}
+                        <button onClick={() => handleRaise(r)} style={{ ...btnSmall, background: "#0ea5e933", color: "#38bdf8", border: "1px solid #0ea5e955" }}>{r.acknowledged ? "↗ Re-raise" : "↗ Raise"}</button>
                         <button onClick={() => setConfirmDelete(r)} style={{ ...btnSmall, background: "#ef444422", color: "#ef4444", border: "1px solid #ef444444" }}>🗑</button>
                       </>
                     )}
