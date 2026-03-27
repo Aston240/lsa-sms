@@ -246,14 +246,246 @@ function SubmitReport({ onSubmit }) {
 }
 
 // ── Raw Reports ───────────────────────────────────────────────────────────────
-function RawReports({ reports, onRaise, setReports, currentUser, onAudit }) {
+function AIReportPanel({ report, allReports, risks, onRaise, onAudit }) {
+  const [state, setState] = useState("idle");
+  const [analysis, setAnalysis] = useState(null);
+  const [chatHistory, setChatHistory] = useState(null);
+  const [chatInput, setChatInput] = useState("");
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const runAnalysis = async () => {
+    setState("loading");
+    setErrorMsg("");
+    try {
+      const res = await fetch("/api/ai-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ report, allReports, risks }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Request failed");
+      const text = data.text || "";
+      const clean = text.replace(/```json|```/g, "").trim();
+      const parsed = JSON.parse(clean);
+      setAnalysis(parsed);
+      const activeReports = (allReports || []).filter(r => !r.deletedAt && r.id !== report.id);
+      const activeRisks = (risks || []).filter(r => !r.deletedAt);
+      setChatHistory([
+        { role: "user", content: `Context: Analysing report #${report.id} "${report.title}" (${report.incidentDate}). Aircraft: ${report.aircraft}. What happened: ${report.what}\n\nExisting reports: ${activeReports.length} in system. Risk register: ${activeRisks.length} active risks.\n\nInitial analysis: ${text}` },
+        { role: "assistant", content: text },
+      ]);
+      onAudit("AI_ANALYSIS", "Raw Reports", `AI analysed report #${report.id}: ${report.title}`, String(report.id));
+      setState("done");
+    } catch (err) {
+      setErrorMsg(err.message);
+      setState("error");
+    }
+  };
+
+  const sendChat = async () => {
+    if (!chatInput.trim() || chatLoading) return;
+    const userMsg = chatInput.trim();
+    setChatInput("");
+    setChatMessages(prev => [...prev, { role: "user", text: userMsg }]);
+    setChatLoading(true);
+    try {
+      const newHistory = [...chatHistory, { role: "user", content: userMsg }];
+      const res = await fetch("/api/ai-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ report, chatHistory: newHistory }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Request failed");
+      const reply = data.text || "";
+      setChatHistory([...newHistory, { role: "assistant", content: reply }]);
+      setChatMessages(prev => [...prev, { role: "assistant", text: reply }]);
+    } catch (err) {
+      setChatMessages(prev => [...prev, { role: "assistant", text: "⚠ Error: " + err.message }]);
+    }
+    setChatLoading(false);
+  };
+
+  const handleAcceptRisk = () => {
+    if (!analysis?.proposedRisk) return;
+    const enrichedReport = {
+      ...report,
+      hazardDescription: analysis.proposedRisk.hazardDescription,
+      hazardCategory: analysis.proposedRisk.hazardCategory,
+      potentialConsequence: analysis.proposedRisk.potentialConsequence,
+      existingControls: analysis.proposedRisk.existingControls,
+      additionalMitigation: analysis.proposedRisk.additionalMitigation,
+      initSeverity: analysis.suggestedSeverity,
+      initLikelihood: analysis.suggestedLikelihood,
+    };
+    onRaise(enrichedReport);
+  };
+
+  const score = analysis ? (analysis.suggestedSeverity || 1) * (analysis.suggestedLikelihood || 1) : 0;
+  const { label: riskLabel, color: riskColor } = score > 0 ? riskLevel(score) : { label: "", color: "#64748b" };
+
+  if (state === "idle") return (
+    <tr>
+      <td colSpan={10} style={{ padding: "0 12px 12px", background: "#060c1a" }}>
+        <div style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontSize: 20 }}>🤖</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0" }}>AI Report Analysis</div>
+            <div style={{ fontSize: 11, color: "#475569" }}>Categorise, rate risk, find similar reports and get suggested actions</div>
+          </div>
+          <button onClick={runAnalysis} style={{ ...btnPrimary, background: "#7c3aed", fontSize: 12, padding: "8px 18px" }}>🤖 Run Analysis</button>
+        </div>
+      </td>
+    </tr>
+  );
+
+  if (state === "loading") return (
+    <tr>
+      <td colSpan={10} style={{ padding: "0 12px 12px", background: "#060c1a" }}>
+        <div style={{ background: "#0f172a", border: "1px solid #7c3aed33", borderRadius: 8, padding: "20px 16px", textAlign: "center" }}>
+          <div style={{ fontSize: 13, color: "#a78bfa", fontWeight: 600 }}>🤖 Analysing report…</div>
+          <div style={{ fontSize: 11, color: "#475569", marginTop: 4 }}>Reviewing incident details, checking for similar reports, assessing risk…</div>
+        </div>
+      </td>
+    </tr>
+  );
+
+  if (state === "error") return (
+    <tr>
+      <td colSpan={10} style={{ padding: "0 12px 12px", background: "#060c1a" }}>
+        <div style={{ background: "#450a0a", border: "1px solid #ef444433", borderRadius: 8, padding: "12px 16px", display: "flex", gap: 12, alignItems: "center" }}>
+          <span>⚠</span>
+          <div style={{ flex: 1, fontSize: 12, color: "#fca5a5" }}>Analysis failed: {errorMsg}</div>
+          <button onClick={runAnalysis} style={btnSmall}>Retry</button>
+        </div>
+      </td>
+    </tr>
+  );
+
+  return (
+    <tr>
+      <td colSpan={10} style={{ padding: "0 12px 16px", background: "#060c1a" }}>
+        <div style={{ background: "#0a0f1e", border: "1px solid #7c3aed44", borderRadius: 10, padding: "20px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#a78bfa" }}>🤖 AI Analysis — Report #{report.id}</div>
+            <button onClick={() => { setState("idle"); setAnalysis(null); setChatMessages([]); }} style={{ ...btnSmall, fontSize: 10 }}>✕ Close</button>
+          </div>
+          {analysis.summary && (
+            <div style={{ background: "#1e1040", border: "1px solid #7c3aed33", borderRadius: 8, padding: "12px 14px", marginBottom: 16, fontSize: 13, color: "#c4b5fd", lineHeight: 1.6 }}>
+              {analysis.summary}
+            </div>
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
+            <div style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8, padding: "12px 14px" }}>
+              <div style={{ fontSize: 10, color: "#475569", textTransform: "uppercase", letterSpacing: ".8px", marginBottom: 6 }}>Suggested Category</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0" }}>{analysis.category}</div>
+            </div>
+            <div style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8, padding: "12px 14px" }}>
+              <div style={{ fontSize: 10, color: "#475569", textTransform: "uppercase", letterSpacing: ".8px", marginBottom: 6 }}>Suggested Risk Rating</div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <span style={{ fontSize: 12, color: "#94a3b8" }}>S:{analysis.suggestedSeverity} × L:{analysis.suggestedLikelihood}</span>
+                <span style={{ background: riskColor + "22", color: riskColor, border: `1px solid ${riskColor}44`, borderRadius: 4, padding: "2px 8px", fontSize: 11, fontWeight: 700 }}>{score} – {riskLabel}</span>
+              </div>
+              <div style={{ fontSize: 10, color: "#475569", marginTop: 6 }}>S: {analysis.severityRationale}</div>
+              <div style={{ fontSize: 10, color: "#475569", marginTop: 2 }}>L: {analysis.likelihoodRationale}</div>
+            </div>
+            <div style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8, padding: "12px 14px" }}>
+              <div style={{ fontSize: 10, color: "#475569", textTransform: "uppercase", letterSpacing: ".8px", marginBottom: 6 }}>Similar Reports</div>
+              {analysis.similarReports?.length > 0 ? (
+                <>
+                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 4 }}>
+                    {analysis.similarReports.map(id => <span key={id} style={{ background: "#f59e0b22", color: "#f59e0b", border: "1px solid #f59e0b44", borderRadius: 4, padding: "2px 6px", fontSize: 11, fontWeight: 700 }}>#{id}</span>)}
+                  </div>
+                  <div style={{ fontSize: 10, color: "#475569" }}>{analysis.similarReportsSummary}</div>
+                </>
+              ) : (
+                <div style={{ fontSize: 12, color: "#22c55e" }}>✓ No similar reports found</div>
+              )}
+            </div>
+          </div>
+          {analysis.proposedRisk && (
+            <div style={{ background: "#0f172a", border: "1px solid #0ea5e933", borderRadius: 8, padding: "14px 16px", marginBottom: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#38bdf8", textTransform: "uppercase", letterSpacing: ".8px" }}>⚠ Proposed Risk Register Entry</div>
+                <button onClick={handleAcceptRisk} style={{ ...btnSmall, background: "#0ea5e933", color: "#38bdf8", border: "1px solid #0ea5e955", fontSize: 11 }}>↗ Accept &amp; Raise to Risk Register</button>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <div style={{ fontSize: 10, color: "#475569", marginBottom: 3 }}>HAZARD</div>
+                  <div style={{ fontSize: 12, color: "#e2e8f0" }}>{analysis.proposedRisk.hazardDescription}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: "#475569", marginBottom: 3 }}>CATEGORY / CONSEQUENCE</div>
+                  <div style={{ fontSize: 12, color: "#94a3b8" }}>{analysis.proposedRisk.hazardCategory}</div>
+                  <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>{analysis.proposedRisk.potentialConsequence}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: "#475569", marginBottom: 3 }}>EXISTING CONTROLS</div>
+                  <div style={{ fontSize: 12, color: "#94a3b8" }}>{analysis.proposedRisk.existingControls}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: "#475569", marginBottom: 3 }}>ADDITIONAL MITIGATION</div>
+                  <div style={{ fontSize: 12, color: "#94a3b8" }}>{analysis.proposedRisk.additionalMitigation}</div>
+                </div>
+              </div>
+            </div>
+          )}
+          {analysis.suggestedActions?.length > 0 && (
+            <div style={{ background: "#0f172a", border: "1px solid #22c55e33", borderRadius: 8, padding: "14px 16px", marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#22c55e", textTransform: "uppercase", letterSpacing: ".8px", marginBottom: 10 }}>✅ Suggested Actions</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {analysis.suggestedActions.map((action, i) => (
+                  <div key={i} style={{ background: "#060c1a", border: "1px solid #1e293b", borderRadius: 6, padding: "10px 12px", display: "flex", gap: 12, alignItems: "flex-start" }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 12, color: "#e2e8f0", fontWeight: 600, marginBottom: 4 }}>{action.description}</div>
+                      <div style={{ fontSize: 11, color: "#64748b" }}>Suggested owner: {action.owner} · {action.rationale}</div>
+                    </div>
+                    <span style={{ background: action.priority === "HIGH" ? "#ef444422" : action.priority === "MEDIUM" ? "#f59e0b22" : "#22c55e22", color: action.priority === "HIGH" ? "#ef4444" : action.priority === "MEDIUM" ? "#f59e0b" : "#22c55e", border: `1px solid ${action.priority === "HIGH" ? "#ef444444" : action.priority === "MEDIUM" ? "#f59e0b44" : "#22c55e44"}`, borderRadius: 4, padding: "2px 8px", fontSize: 10, fontWeight: 700, flexShrink: 0 }}>{action.priority}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize: 11, color: "#475569", marginTop: 8 }}>💡 Use "Accept &amp; Raise to Risk Register" above — actions can be added from the Risk Editor.</div>
+            </div>
+          )}
+          <div style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8, padding: "14px 16px" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: ".8px", marginBottom: 10 }}>💬 Ask a Follow-up Question</div>
+            {chatMessages.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12, maxHeight: 280, overflowY: "auto" }}>
+                {chatMessages.map((msg, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: msg.role === "user" ? "flex-end" : "flex-start" }}>
+                    <div style={{ maxWidth: "80%", background: msg.role === "user" ? "#1e293b" : "#1e1040", border: `1px solid ${msg.role === "user" ? "#334155" : "#7c3aed33"}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: msg.role === "user" ? "#e2e8f0" : "#c4b5fd", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{msg.text}</div>
+                  </div>
+                ))}
+                {chatLoading && (
+                  <div style={{ display: "flex", justifyContent: "flex-start" }}>
+                    <div style={{ background: "#1e1040", border: "1px solid #7c3aed33", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#7c3aed" }}>Thinking…</div>
+                  </div>
+                )}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8 }}>
+              <input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === "Enter" && !e.shiftKey && sendChat()} placeholder="e.g. What regulatory reference applies here? Suggest a more specific action…" style={{ ...inputStyle, flex: 1, fontSize: 12 }} disabled={chatLoading} />
+              <button onClick={sendChat} disabled={chatLoading || !chatInput.trim()} style={{ ...btnPrimary, background: "#7c3aed", padding: "8px 16px", fontSize: 12, opacity: chatLoading || !chatInput.trim() ? 0.5 : 1 }}>Send</button>
+            </div>
+          </div>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+function RawReports({ reports, risks, onRaise, setReports, currentUser, onAudit }) {
   const [search, setSearch] = useState("");
   const [showDeleted, setShowDeleted] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [openAiPanel, setOpenAiPanel] = useState(null);
+  const isAdmin = currentUser?.role === "admin";
   const active = reports.filter(r => !r.deletedAt);
   const deleted = reports.filter(r => !!r.deletedAt);
   const list = showDeleted ? deleted : active;
-  const filtered = list.filter(r => r.title.toLowerCase().includes(search.toLowerCase()) || (r.aircraft || "").toLowerCase().includes(search.toLowerCase()));
+  const filtered = list.filter(r => r.title.toLowerCase().includes(search.toLowerCase()) || (r.aircraft || "").toLowerCase().includes(search.toLowerCase())).sort((a, b) => b.id - a.id);
   const doDelete = id => {
     const report = reports.find(r => r.id === id);
     setReports(prev => prev.map(r => r.id === id ? { ...r, deletedAt: new Date().toISOString() } : r));
@@ -264,6 +496,9 @@ function RawReports({ reports, onRaise, setReports, currentUser, onAudit }) {
     const report = reports.find(r => r.id === id);
     setReports(prev => prev.map(r => r.id === id ? { ...r, deletedAt: null } : r));
     onAudit("REPORT_RESTORED", "Raw Reports", `Restored report #${id}: ${report?.title}`, String(id));
+  };
+  const handleRaise = (report) => {
+    onRaise(report);
   };
   return (
     <div>
@@ -297,29 +532,37 @@ function RawReports({ reports, onRaise, setReports, currentUser, onAudit }) {
         <table style={tableStyle}>
           <thead><tr>{["ID", "Source", "Date", "Title", "Aircraft", "Location", "PIC Type", "Reporter", "Status", ""].map(h => <th key={h} style={thStyle}>{h}</th>)}</tr></thead>
           <tbody>{filtered.map(r => (
-            <tr key={r.id} style={{ opacity: r.deletedAt ? 0.6 : 1 }}>
-              <td style={tdStyle}>{r.id}</td>
-              <td style={tdStyle}>{r.source === "forms" ? <Badge color="#818cf8">MS Forms</Badge> : r.source === "manual" ? <Badge color="#38bdf8">Manual</Badge> : r.source === "excel-import" ? <Badge color="#38bdf8">Import</Badge> : <Badge color="#475569">Excel</Badge>}</td>
-              <td style={tdStyle}>{fmt(r.incidentDate)}</td>
-              <td style={{ ...tdStyle, maxWidth: 220 }}>{r.title}</td>
-              <td style={tdStyle}>{r.aircraft}</td>
-              <td style={tdStyle}>{r.location}</td>
-              <td style={tdStyle}>{r.picType}</td>
-              <td style={tdStyle}>{r.reporterDetails || <span style={{ color: "#475569" }}>Anonymous</span>}</td>
-              <td style={tdStyle}>{r.deletedAt ? <Badge color="#7c3aed">Deleted {fmt(r.deletedAt)}</Badge> : r.acknowledged ? <Badge color="#22c55e">✓ Acknowledged</Badge> : <Badge color="#f59e0b">Pending Review</Badge>}</td>
-              <td style={tdStyle}>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {r.deletedAt ? (
-                    <button onClick={() => doRestore(r.id)} style={{ ...btnSmall, background: "#22c55e22", color: "#22c55e", border: "1px solid #22c55e44" }}>↩ Restore</button>
-                  ) : (
-                    <>
-                      {!r.acknowledged && <button onClick={() => onRaise(r)} style={{ ...btnSmall, background: "#0ea5e933", color: "#38bdf8", border: "1px solid #0ea5e955" }}>↗ Raise</button>}
-                      <button onClick={() => setConfirmDelete(r)} style={{ ...btnSmall, background: "#ef444422", color: "#ef4444", border: "1px solid #ef444444" }}>🗑</button>
-                    </>
-                  )}
-                </div>
-              </td>
-            </tr>
+            <>
+              <tr key={r.id} style={{ opacity: r.deletedAt ? 0.6 : 1, background: openAiPanel === r.id ? "#060c1a" : undefined }}>
+                <td style={tdStyle}>{r.id}</td>
+                <td style={tdStyle}>{r.source === "forms" ? <Badge color="#818cf8">MS Forms</Badge> : r.source === "manual" ? <Badge color="#38bdf8">Manual</Badge> : r.source === "excel-import" ? <Badge color="#38bdf8">Import</Badge> : <Badge color="#475569">Excel</Badge>}</td>
+                <td style={tdStyle}>{fmt(r.incidentDate)}</td>
+                <td style={{ ...tdStyle, maxWidth: 220 }}>{r.title}</td>
+                <td style={tdStyle}>{r.aircraft}</td>
+                <td style={tdStyle}>{r.location}</td>
+                <td style={tdStyle}>{r.picType}</td>
+                <td style={tdStyle}>{r.reporterDetails || <span style={{ color: "#475569" }}>Anonymous</span>}</td>
+                <td style={tdStyle}>{r.deletedAt ? <Badge color="#7c3aed">Deleted {fmt(r.deletedAt)}</Badge> : r.acknowledged ? <Badge color="#22c55e">✓ Acknowledged</Badge> : <Badge color="#f59e0b">Pending Review</Badge>}</td>
+                <td style={tdStyle}>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {r.deletedAt ? (
+                      <button onClick={() => doRestore(r.id)} style={{ ...btnSmall, background: "#22c55e22", color: "#22c55e", border: "1px solid #22c55e44" }}>↩ Restore</button>
+                    ) : (
+                      <>
+                        {isAdmin && (
+                          <button onClick={() => setOpenAiPanel(prev => prev === r.id ? null : r.id)} style={{ ...btnSmall, background: openAiPanel === r.id ? "#7c3aed33" : "#1e293b", color: openAiPanel === r.id ? "#a78bfa" : "#94a3b8", border: openAiPanel === r.id ? "1px solid #7c3aed55" : "1px solid #334155" }}>🤖</button>
+                        )}
+                        {!r.acknowledged && <button onClick={() => handleRaise(r)} style={{ ...btnSmall, background: "#0ea5e933", color: "#38bdf8", border: "1px solid #0ea5e955" }}>↗ Raise</button>}
+                        <button onClick={() => setConfirmDelete(r)} style={{ ...btnSmall, background: "#ef444422", color: "#ef4444", border: "1px solid #ef444444" }}>🗑</button>
+                      </>
+                    )}
+                  </div>
+                </td>
+              </tr>
+              {isAdmin && openAiPanel === r.id && (
+                <AIReportPanel key={`ai-${r.id}`} report={r} allReports={reports} risks={risks} onRaise={handleRaise} onAudit={onAudit} />
+              )}
+            </>
           ))}</tbody>
         </table>
       </div>
@@ -337,7 +580,7 @@ function RiskRegister({ risks, setRisks, actions, setActions, raiseTarget, onRai
   const active = risks.filter(r => !r.deletedAt);
   const deleted = risks.filter(r => !!r.deletedAt);
   const list = showDeleted ? deleted : active;
-  const filtered = list.filter(r => (!search || (r.id + r.hazardDescription + r.aircraft).toLowerCase().includes(search.toLowerCase())) && (!filterStatus || r.status === filterStatus));
+  const filtered = list.filter(r => (!search || (r.id + r.hazardDescription + r.aircraft).toLowerCase().includes(search.toLowerCase())) && (!filterStatus || r.status === filterStatus)).sort((a, b) => b.id.localeCompare(a.id));
   const save = updated => {
     const isNew = updated.id === "NEW";
     setRisks(prev => prev.map(r => r.id === updated.id ? updated : r));
@@ -371,9 +614,14 @@ function RiskRegister({ risks, setRisks, actions, setActions, raiseTarget, onRai
       dateIdentified: raiseTarget.incidentDate || new Date().toISOString().slice(0, 10),
       aircraft: raiseTarget.aircraft || "", picType: raiseTarget.picType || "",
       location: raiseTarget.location || "", operationalArea: raiseTarget.operationalArea || "",
-      hazardDescription: raiseTarget.title + (raiseTarget.what ? "\n\n" + raiseTarget.what : ""),
-      potentialConsequence: "", hazardCategory: "", initSeverity: 1, initLikelihood: 1,
-      existingControls: "", additionalMitigation: "", actionOwner: "", targetDate: "",
+      hazardDescription: raiseTarget.hazardDescription || (raiseTarget.title + (raiseTarget.what ? "\n\n" + raiseTarget.what : "")),
+      potentialConsequence: raiseTarget.potentialConsequence || "",
+      hazardCategory: raiseTarget.hazardCategory || "",
+      initSeverity: raiseTarget.initSeverity || 1,
+      initLikelihood: raiseTarget.initLikelihood || 1,
+      existingControls: raiseTarget.existingControls || "",
+      additionalMitigation: raiseTarget.additionalMitigation || "",
+      actionOwner: "", targetDate: "",
       status: "Open", dateImplemented: "", residualSeverity: null, residualLikelihood: null, monitoringMethod: "",
     };
     return (
@@ -381,9 +629,10 @@ function RiskRegister({ risks, setRisks, actions, setActions, raiseTarget, onRai
         <div style={{ background: "#0f172a", border: "1px solid #0ea5e955", borderRadius: 8, padding: "12px 16px", marginBottom: 16, display: "flex", gap: 12, alignItems: "center" }}>
           <span style={{ fontSize: 18 }}>✈</span>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#38bdf8" }}>Raising Report #{raiseTarget.id} to Risk Register</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#38bdf8" }}>Raising Report #{raiseTarget.id} to Risk Register{raiseTarget.hazardCategory ? " (AI pre-filled)" : ""}</div>
             <div style={{ fontSize: 12, color: "#64748b" }}>{raiseTarget.title} · {raiseTarget.aircraft}</div>
           </div>
+          {raiseTarget.hazardCategory && <span style={{ background: "#7c3aed22", color: "#a78bfa", border: "1px solid #7c3aed44", borderRadius: 4, padding: "2px 8px", fontSize: 11, fontWeight: 700 }}>🤖 AI Pre-filled</span>}
         </div>
         <RiskEditor risk={prefilled} onSave={onRaiseSave} onCancel={onRaiseCancel} onAddAction={addAction} isNew />
       </div>
@@ -1390,7 +1639,7 @@ export default function App() {
         {tab === "dashboard" && <Dashboard reports={reports} risks={risks} actions={actions} />}
         {tab === "submit" && <SubmitReport onSubmit={addReport} />}
         {tab === "import" && <ExcelImport reports={reports} onImport={importReports} />}
-        {tab === "rawreports" && <RawReports reports={reports} onRaise={raiseToRiskRegister} setReports={setReports} currentUser={currentUser} onAudit={onAudit} />}
+        {tab === "rawreports" && <RawReports reports={reports} risks={risks} onRaise={raiseToRiskRegister} setReports={setReports} currentUser={currentUser} onAudit={onAudit} />}
         {tab === "riskregister" && <RiskRegister risks={risks} setRisks={setRisks} actions={actions} setActions={setActions} raiseTarget={raiseTarget} onRaiseSave={handleRaiseSave} onRaiseCancel={() => setRaiseTarget(null)} onAudit={onAudit} />}
         {tab === "actionlog" && <ActionLog actions={actions} setActions={setActions} risks={risks} onAudit={onAudit} />}
         {tab === "backups" && <BackupsTab onRestore={handleRestore} />}
