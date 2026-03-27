@@ -254,6 +254,10 @@ function AIReportPanel({ report, allReports, risks, onRaise, onAudit }) {
   const [chatMessages, setChatMessages] = useState([]);
   const [chatLoading, setChatLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [selectedActions, setSelectedActions] = useState([]);
+  const [actionsSaved, setActionsSaved] = useState(false);
+
+  const toggleAction = (i) => setSelectedActions(prev => prev.includes(i) ? prev.filter(x => x !== i) : [...prev, i]);
 
   const runAnalysis = async () => {
     setState("loading");
@@ -270,6 +274,7 @@ function AIReportPanel({ report, allReports, risks, onRaise, onAudit }) {
       const clean = text.replace(/```json|```/g, "").trim();
       const parsed = JSON.parse(clean);
       setAnalysis(parsed);
+      setSelectedActions(parsed.suggestedActions?.map((_, i) => i) || []);
       const activeReports = (allReports || []).filter(r => !r.deletedAt && r.id !== report.id);
       const activeRisks = (risks || []).filter(r => !r.deletedAt);
       setChatHistory([
@@ -370,7 +375,7 @@ function AIReportPanel({ report, allReports, risks, onRaise, onAudit }) {
         <div style={{ background: "#0a0f1e", border: "1px solid #7c3aed44", borderRadius: 10, padding: "20px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: "#a78bfa" }}>🤖 AI Analysis — Report #{report.id}</div>
-            <button onClick={() => { setState("idle"); setAnalysis(null); setChatMessages([]); }} style={{ ...btnSmall, fontSize: 10 }}>✕ Close</button>
+            <button onClick={() => { setState("idle"); setAnalysis(null); setChatMessages([]); setSelectedActions([]); setActionsSaved(false); }} style={{ ...btnSmall, fontSize: 10 }}>✕ Close</button>
           </div>
           {analysis.summary && (
             <div style={{ background: "#1e1040", border: "1px solid #7c3aed33", borderRadius: 8, padding: "12px 14px", marginBottom: 16, fontSize: 13, color: "#c4b5fd", lineHeight: 1.6 }}>
@@ -434,19 +439,59 @@ function AIReportPanel({ report, allReports, risks, onRaise, onAudit }) {
           )}
           {analysis.suggestedActions?.length > 0 && (
             <div style={{ background: "#0f172a", border: "1px solid #22c55e33", borderRadius: 8, padding: "14px 16px", marginBottom: 16 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#22c55e", textTransform: "uppercase", letterSpacing: ".8px", marginBottom: 10 }}>✅ Suggested Actions</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {analysis.suggestedActions.map((action, i) => (
-                  <div key={i} style={{ background: "#060c1a", border: "1px solid #1e293b", borderRadius: 6, padding: "10px 12px", display: "flex", gap: 12, alignItems: "flex-start" }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 12, color: "#e2e8f0", fontWeight: 600, marginBottom: 4 }}>{action.description}</div>
-                      <div style={{ fontSize: 11, color: "#64748b" }}>Suggested owner: {action.owner} · {action.rationale}</div>
-                    </div>
-                    <span style={{ background: action.priority === "HIGH" ? "#ef444422" : action.priority === "MEDIUM" ? "#f59e0b22" : "#22c55e22", color: action.priority === "HIGH" ? "#ef4444" : action.priority === "MEDIUM" ? "#f59e0b" : "#22c55e", border: `1px solid ${action.priority === "HIGH" ? "#ef444444" : action.priority === "MEDIUM" ? "#f59e0b44" : "#22c55e44"}`, borderRadius: 4, padding: "2px 8px", fontSize: 10, fontWeight: 700, flexShrink: 0 }}>{action.priority}</span>
-                  </div>
-                ))}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#22c55e", textTransform: "uppercase", letterSpacing: ".8px" }}>✅ Suggested Actions</div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <span style={{ fontSize: 11, color: "#475569" }}>{selectedActions.length} of {analysis.suggestedActions.length} selected</span>
+                  {actionsSaved
+                    ? <span style={{ fontSize: 11, color: "#22c55e", fontWeight: 700 }}>✓ Added to Risk Register queue</span>
+                    : <button
+                        onClick={() => {
+                          if (selectedActions.length === 0) return;
+                          const enrichedReport = {
+                            ...report,
+                            hazardDescription: analysis.proposedRisk?.hazardDescription || (report.title + (report.what ? "\n\n" + report.what : "")),
+                            hazardCategory: analysis.proposedRisk?.hazardCategory || "",
+                            potentialConsequence: analysis.proposedRisk?.potentialConsequence || "",
+                            existingControls: analysis.proposedRisk?.existingControls || "",
+                            additionalMitigation: analysis.proposedRisk?.additionalMitigation || "",
+                            initSeverity: analysis.suggestedSeverity,
+                            initLikelihood: analysis.suggestedLikelihood,
+                            _selectedActions: selectedActions.map(i => analysis.suggestedActions[i]),
+                          };
+                          onRaise(enrichedReport);
+                          setActionsSaved(true);
+                        }}
+                        disabled={selectedActions.length === 0}
+                        style={{ ...btnSmall, background: selectedActions.length > 0 ? "#22c55e22" : "#1e293b", color: selectedActions.length > 0 ? "#22c55e" : "#475569", border: `1px solid ${selectedActions.length > 0 ? "#22c55e44" : "#334155"}`, fontSize: 11 }}
+                      >↗ Raise with Selected Actions</button>
+                  }
+                </div>
               </div>
-              <div style={{ fontSize: 11, color: "#475569", marginTop: 8 }}>💡 Use "Accept &amp; Raise to Risk Register" above — actions can be added from the Risk Editor.</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {analysis.suggestedActions.map((action, i) => {
+                  const selected = selectedActions.includes(i);
+                  return (
+                    <div
+                      key={i}
+                      onClick={() => toggleAction(i)}
+                      style={{ background: selected ? "#0a1f0a" : "#060c1a", border: `1px solid ${selected ? "#22c55e44" : "#1e293b"}`, borderRadius: 6, padding: "10px 12px", display: "flex", gap: 12, alignItems: "flex-start", cursor: "pointer" }}
+                    >
+                      <div style={{ marginTop: 1, flexShrink: 0 }}>
+                        <div style={{ width: 16, height: 16, borderRadius: 3, border: `2px solid ${selected ? "#22c55e" : "#334155"}`, background: selected ? "#22c55e" : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          {selected && <span style={{ color: "#000", fontSize: 11, fontWeight: 900, lineHeight: 1 }}>✓</span>}
+                        </div>
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12, color: selected ? "#e2e8f0" : "#94a3b8", fontWeight: 600, marginBottom: 4 }}>{action.description}</div>
+                        <div style={{ fontSize: 11, color: "#64748b" }}>Suggested owner: {action.owner} · {action.rationale}</div>
+                      </div>
+                      <span style={{ background: action.priority === "HIGH" ? "#ef444422" : action.priority === "MEDIUM" ? "#f59e0b22" : "#22c55e22", color: action.priority === "HIGH" ? "#ef4444" : action.priority === "MEDIUM" ? "#f59e0b" : "#22c55e", border: `1px solid ${action.priority === "HIGH" ? "#ef444444" : action.priority === "MEDIUM" ? "#f59e0b44" : "#22c55e44"}`, borderRadius: 4, padding: "2px 8px", fontSize: 10, fontWeight: 700, flexShrink: 0 }}>{action.priority}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 11, color: "#475569", marginTop: 8 }}>Click an action to select or deselect it, then raise to the Risk Register.</div>
             </div>
           )}
           <div style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8, padding: "14px 16px" }}>
