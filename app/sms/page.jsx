@@ -246,7 +246,7 @@ function SubmitReport({ onSubmit }) {
 }
 
 // ── Raw Reports ───────────────────────────────────────────────────────────────
-function AIReportPanel({ report, allReports, risks, onRaise, onAudit }) {
+function AIReportPanel({ report, allReports, risks, onRaise, onAudit, setReports }) {
   const [state, setState] = useState("idle");
   const [analysis, setAnalysis] = useState(null);
   const [chatHistory, setChatHistory] = useState(null);
@@ -275,6 +275,10 @@ function AIReportPanel({ report, allReports, risks, onRaise, onAudit }) {
       const parsed = JSON.parse(clean);
       setAnalysis(parsed);
       setSelectedActions(parsed.suggestedActions?.map((_, i) => i) || []);
+      // Persist AI suggestions onto the report object so they're available in the Risk Editor later
+      if (parsed.suggestedActions?.length > 0) {
+        setReports(prev => prev.map(r => r.id === report.id ? { ...r, aiSuggestedActions: parsed.suggestedActions } : r));
+      }
       const activeReports = (allReports || []).filter(r => !r.deletedAt && r.id !== report.id);
       const activeRisks = (risks || []).filter(r => !r.deletedAt);
       setChatHistory([
@@ -605,7 +609,7 @@ function RawReports({ reports, risks, onRaise, setReports, currentUser, onAudit 
                 </td>
               </tr>
               {isAdmin && openAiPanel === r.id && (
-                <AIReportPanel key={`ai-${r.id}`} report={r} allReports={reports} risks={risks} onRaise={handleRaise} onAudit={onAudit} />
+                <AIReportPanel key={`ai-${r.id}`} report={r} allReports={reports} risks={risks} onRaise={handleRaise} onAudit={onAudit} setReports={setReports} />
               )}
             </>
           ))}</tbody>
@@ -616,7 +620,7 @@ function RawReports({ reports, risks, onRaise, setReports, currentUser, onAudit 
 }
 
 // ── Risk Register ─────────────────────────────────────────────────────────────
-function RiskRegister({ risks, setRisks, actions, setActions, raiseTarget, onRaiseSave, onRaiseCancel, onAudit }) {
+function RiskRegister({ risks, setRisks, actions, setActions, reports, raiseTarget, onRaiseSave, onRaiseCancel, onAudit }) {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
@@ -679,12 +683,12 @@ function RiskRegister({ risks, setRisks, actions, setActions, raiseTarget, onRai
           </div>
           {raiseTarget.hazardCategory && <span style={{ background: "#7c3aed22", color: "#a78bfa", border: "1px solid #7c3aed44", borderRadius: 4, padding: "2px 8px", fontSize: 11, fontWeight: 700 }}>🤖 AI Pre-filled</span>}
         </div>
-        <RiskEditor risk={prefilled} onSave={onRaiseSave} onCancel={onRaiseCancel} onAddAction={addAction} isNew />
+        <RiskEditor risk={prefilled} onSave={onRaiseSave} onCancel={onRaiseCancel} onAddAction={addAction} reports={reports} isNew />
       </div>
     );
   }
 
-  if (editing) return <RiskEditor risk={editing} onSave={save} onCancel={() => setEditing(null)} onAddAction={addAction} />;
+  if (editing) return <RiskEditor risk={editing} onSave={save} onCancel={() => setEditing(null)} onAddAction={addAction} reports={reports} />;
   return (
     <div>
       {confirmDeleteRisk && (
@@ -759,12 +763,28 @@ function RiskRegister({ risks, setRisks, actions, setActions, raiseTarget, onRai
   );
 }
 
-function RiskEditor({ risk, onSave, onCancel, isNew, onAddAction }) {
+function RiskEditor({ risk, onSave, onCancel, isNew, onAddAction, reports }) {
   const [form, setForm] = useState({ ...risk });
   const [showActionForm, setShowActionForm] = useState(false);
   const [actionForm, setActionForm] = useState({ description: "", owner: risk.actionOwner || "", targetDate: "", priority: "MEDIUM", status: "Open" });
+  const [selectedAiActions, setSelectedAiActions] = useState([]);
   const set = k => v => setForm(f => ({ ...f, [k]: v }));
   const setAct = k => v => setActionForm(f => ({ ...f, [k]: v }));
+
+  // Look up AI suggested actions from the linked source report
+  const sourceReport = reports?.find(r => r.id === (risk.reportId || form.reportId));
+  const aiActions = sourceReport?.aiSuggestedActions || [];
+
+  const toggleAiAction = (i) => setSelectedAiActions(prev => prev.includes(i) ? prev.filter(x => x !== i) : [...prev, i]);
+
+  const addSelectedAiActions = () => {
+    selectedAiActions.forEach(i => {
+      const a = aiActions[i];
+      onAddAction({ description: a.description, owner: a.owner, priority: a.priority, status: "Open", targetDate: "", hazardId: form.id });
+    });
+    setSelectedAiActions([]);
+  };
+
   return (
     <div style={{ maxWidth: 780 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
@@ -800,12 +820,45 @@ function RiskEditor({ risk, onSave, onCancel, isNew, onAddAction }) {
       <button onClick={() => onSave(form)} style={{ ...btnPrimary, marginTop: 18 }}>{isNew ? "✓ Save to Risk Register" : "Save Changes"}</button>
       {!isNew && (
         <div style={{ marginTop: 24, padding: 16, background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: aiActions.length > 0 ? 12 : 0 }}>
             <span style={{ fontSize: 12, fontWeight: 700, color: "#475569", letterSpacing: "1px", textTransform: "uppercase" }}>Actions for this Risk</span>
             <button onClick={() => setShowActionForm(v => !v)} style={{ ...btnSmall, background: "#7c3aed22", color: "#a78bfa", border: "1px solid #7c3aed44" }}>
               {showActionForm ? "✕ Cancel" : "＋ Create Action"}
             </button>
           </div>
+
+          {/* AI suggested actions */}
+          {aiActions.length > 0 && (
+            <div style={{ background: "#060c1a", border: "1px solid #22c55e33", borderRadius: 8, padding: "12px 14px", marginBottom: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#22c55e", textTransform: "uppercase", letterSpacing: ".8px" }}>🤖 AI Suggested Actions</div>
+                <button
+                  onClick={addSelectedAiActions}
+                  disabled={selectedAiActions.length === 0}
+                  style={{ ...btnSmall, background: selectedAiActions.length > 0 ? "#22c55e22" : "#1e293b", color: selectedAiActions.length > 0 ? "#22c55e" : "#475569", border: `1px solid ${selectedAiActions.length > 0 ? "#22c55e44" : "#334155"}`, fontSize: 11 }}
+                >＋ Add {selectedAiActions.length > 0 ? selectedAiActions.length : ""} Selected</button>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {aiActions.map((action, i) => {
+                  const selected = selectedAiActions.includes(i);
+                  return (
+                    <div key={i} onClick={() => toggleAiAction(i)} style={{ background: selected ? "#0a1f0a" : "#0f172a", border: `1px solid ${selected ? "#22c55e44" : "#1e293b"}`, borderRadius: 6, padding: "8px 12px", display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer" }}>
+                      <div style={{ marginTop: 2, flexShrink: 0, width: 14, height: 14, borderRadius: 3, border: `2px solid ${selected ? "#22c55e" : "#334155"}`, background: selected ? "#22c55e" : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        {selected && <span style={{ color: "#000", fontSize: 10, fontWeight: 900, lineHeight: 1 }}>✓</span>}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12, color: selected ? "#e2e8f0" : "#94a3b8", fontWeight: 600 }}>{action.description}</div>
+                        <div style={{ fontSize: 11, color: "#475569", marginTop: 2 }}>{action.owner} · {action.rationale}</div>
+                      </div>
+                      <span style={{ background: action.priority === "HIGH" ? "#ef444422" : action.priority === "MEDIUM" ? "#f59e0b22" : "#22c55e22", color: action.priority === "HIGH" ? "#ef4444" : action.priority === "MEDIUM" ? "#f59e0b" : "#22c55e", border: `1px solid ${action.priority === "HIGH" ? "#ef444444" : action.priority === "MEDIUM" ? "#f59e0b44" : "#22c55e44"}`, borderRadius: 4, padding: "2px 6px", fontSize: 10, fontWeight: 700, flexShrink: 0 }}>{action.priority}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 11, color: "#475569", marginTop: 8 }}>Click to select, then "Add Selected" — or use the manual form below to write your own.</div>
+            </div>
+          )}
+
           {showActionForm && (
             <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <div style={{ gridColumn: "1/-1" }}><Input label="Action Description" value={actionForm.description} onChange={setAct("description")} rows={2} /></div>
@@ -1704,7 +1757,7 @@ export default function App() {
         {tab === "submit" && <SubmitReport onSubmit={addReport} />}
         {tab === "import" && <ExcelImport reports={reports} onImport={importReports} />}
         {tab === "rawreports" && <RawReports reports={reports} risks={risks} onRaise={raiseToRiskRegister} setReports={setReports} currentUser={currentUser} onAudit={onAudit} />}
-        {tab === "riskregister" && <RiskRegister risks={risks} setRisks={setRisks} actions={actions} setActions={setActions} raiseTarget={raiseTarget} onRaiseSave={handleRaiseSave} onRaiseCancel={() => setRaiseTarget(null)} onAudit={onAudit} />}
+        {tab === "riskregister" && <RiskRegister risks={risks} setRisks={setRisks} actions={actions} setActions={setActions} reports={reports} raiseTarget={raiseTarget} onRaiseSave={handleRaiseSave} onRaiseCancel={() => setRaiseTarget(null)} onAudit={onAudit} />}
         {tab === "actionlog" && <ActionLog actions={actions} setActions={setActions} risks={risks} onAudit={onAudit} />}
         {tab === "backups" && <BackupsTab onRestore={handleRestore} />}
         {tab === "export" && <ExportTab reports={reports} risks={risks} actions={actions} />}
