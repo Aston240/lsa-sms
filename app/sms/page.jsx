@@ -888,7 +888,7 @@ function ActionLog({ actions, setActions, risks, onAudit }) {
   const deleted = actions.filter(a => !!a.deletedAt);
   const list = showDeleted ? deleted : active;
   const owners = [...new Set(active.map(a => a.owner))];
-  const filtered = list.filter(a => (!filterOwner || a.owner === filterOwner) && (!filterStatus || a.status === filterStatus));
+  const filtered = list.filter(a => (!filterOwner || a.owner === filterOwner) && (!filterStatus || a.status === filterStatus)).sort((a, b) => b.id.localeCompare(a.id));
   const save = updated => {
     setActions(prev => prev.map(a => a.id === updated.id ? updated : a));
     onAudit("ACTION_UPDATED", "Action Log", `Updated action ${updated.id}: ${updated.description?.slice(0, 60)}`, updated.id);
