@@ -1374,12 +1374,10 @@ function BulletinsTab({ reports, actions, currentUser, onAudit }) {
       }
 
       // Actions for pilots — combine all themes
-      const allActions = themes.map(t => (t.actionsForPilots || "").trim()).filter(Boolean).join("
-");
+      const allActions = themes.map(t => (t.actionsForPilots || "").trim()).filter(Boolean).join("\n");
       const actionsHtml = `<div style="${blockStyle("#eaf3de","","","")}">
         ${label("Actions for Pilots", "#3b6d11")}
-        ${body(allActions.replace(/^[·•]/gm, "&#8226;").replace(/
-/g, "<br/>"), "#27500a")}
+        ${body(allActions.replace(/^[\u00b7\u2022]/gm, "&#8226;").replace(/\n/g, "<br/>"), "#27500a")}
       </div>`;
 
       // What we acted
