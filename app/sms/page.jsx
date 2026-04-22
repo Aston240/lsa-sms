@@ -1319,13 +1319,13 @@ function BulletinsTab({ reports, actions, currentUser, onAudit }) {
       const acted = draft.whatWeActed || [];
 
       const blockStyle = (bg, labelCol, bodyCol, borderCol) =>
-        `background:${bg};border-radius:6px;padding:11px 14px;margin-bottom:10px;${borderCol ? `border:1px solid ${borderCol};` : ""}`;
+        `background:${bg};border-radius:5pt;padding:10pt 12pt;margin-bottom:8pt;${borderCol ? `border:1pt solid ${borderCol};` : ""}`;
 
       const label = (text, col) =>
-        `<div style="font-size:8px;font-weight:700;color:${col};text-transform:uppercase;letter-spacing:.8px;margin-bottom:5px;">${text}</div>`;
+        `<div style="font-size:8pt;font-weight:700;color:${col};text-transform:uppercase;letter-spacing:.6pt;margin-bottom:4pt;">${text}</div>`;
 
       const body = (text, col) =>
-        `<div style="font-size:10px;color:${col};line-height:1.6;">${text}</div>`;
+        `<div style="font-size:10.5pt;color:${col};line-height:1.55;">${text}</div>`;
 
       // Trend blocks — 2 column if multiple
       let trendHtml = "";
@@ -1336,7 +1336,7 @@ function BulletinsTab({ reports, actions, currentUser, onAudit }) {
           ${body(t.trendSummary || "", "#ffffff")}
         </div>`;
       } else {
-        trendHtml = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+        trendHtml = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8pt;margin-bottom:8pt;">
           ${themes.slice(0, 2).map((t, i) => `<div style="${blockStyle(i===0?"#0c2340":"#1e3a5f","","")}">
             ${label(`Trend — ${t.category || ""}`, "#7eb8e8")}
             ${body(t.trendSummary || "", "#ffffff")}
@@ -1359,7 +1359,7 @@ function BulletinsTab({ reports, actions, currentUser, onAudit }) {
           ${body(themes[0].lessonLearned || "", "#5f5e5a")}
         </div>`;
       } else {
-        lessonsHtml = `<div style="display:grid;grid-template-columns:${themes.length >= 2 ? "1fr 1fr" : "1fr"};gap:8px;margin-bottom:10px;">
+        lessonsHtml = `<div style="display:grid;grid-template-columns:${themes.length >= 2 ? "1fr 1fr" : "1fr"};gap:8pt;margin-bottom:8pt;">
           ${themes.slice(0, 2).map(t => `<div style="${blockStyle("#f1efe8","","","")}">
             ${label(`Lesson Learned — ${t.title || ""}`, "#444441")}
             ${body(t.lessonLearned || "", "#5f5e5a")}
@@ -1393,47 +1393,49 @@ function BulletinsTab({ reports, actions, currentUser, onAudit }) {
 <meta charset="UTF-8"/>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family: Arial, sans-serif; background: white; width: 210mm; }
+  html, body { width:210mm; font-family:Arial,Helvetica,sans-serif; background:white; font-size:11pt; }
+  @page { size:A4; margin:0; }
   @media print {
-    body { width: 210mm; }
-    @page { size: A4; margin: 0; }
+    html, body { width:210mm; }
+    * { -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; color-adjust:exact !important; }
   }
-  @media screen {
-    body { max-width: 210mm; margin: 0 auto; padding: 0; }
-  }
+  .block { border-radius:5pt; padding:10pt 12pt; margin-bottom:8pt; }
+  .label { font-size:8pt; font-weight:700; text-transform:uppercase; letter-spacing:.6pt; margin-bottom:4pt; }
+  .body { font-size:10.5pt; line-height:1.55; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:8pt; margin-bottom:8pt; }
 </style>
 </head>
 <body>
   <!-- HEADER -->
-  <div style="background:#185fa5;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;min-height:28mm;">
-    <div style="display:flex;align-items:center;gap:12px;">
-      <div style="background:white;padding:5px 12px;border-radius:3px;">
-        <span style="font-size:14px;font-weight:900;color:#0c2340;letter-spacing:2px;">LS AIRMOTIVE</span>
+  <div style="background:#185fa5;padding:11pt 14pt;display:flex;align-items:center;justify-content:space-between;min-height:26mm;">
+    <div style="display:flex;align-items:center;gap:12pt;">
+      <div style="background:white;padding:5pt 12pt;border-radius:3pt;">
+        <span style="font-size:14pt;font-weight:900;color:#0c2340;letter-spacing:2pt;">LS AIRMOTIVE</span>
       </div>
-      <div style="width:1px;height:30px;background:rgba(255,255,255,0.3);"></div>
+      <div style="width:1pt;height:28pt;background:rgba(255,255,255,0.3);"></div>
       <div>
-        <div style="font-size:13px;font-weight:700;color:white;">Flight Safety Bulletin</div>
-        <div style="font-size:9px;color:#b5d4f4;">Issue ${meta.issueNumber} &nbsp;·&nbsp; ${meta.dateFrom} to ${meta.dateTo}</div>
+        <div style="font-size:14pt;font-weight:700;color:white;">Flight Safety Bulletin</div>
+        <div style="font-size:9pt;color:#b5d4f4;margin-top:3pt;">Issue ${meta.issueNumber} &nbsp;·&nbsp; ${meta.dateFrom} to ${meta.dateTo}</div>
       </div>
     </div>
-    <div style="display:flex;gap:6px;">
-      <div style="background:rgba(255,255,255,0.15);border-radius:4px;padding:6px 10px;text-align:center;min-width:36px;">
-        <div style="font-size:16px;font-weight:700;color:white;">${meta.reportCount}</div>
-        <div style="font-size:7px;color:#b5d4f4;text-transform:uppercase;letter-spacing:.5px;">Reports</div>
+    <div style="display:flex;gap:6pt;">
+      <div style="background:rgba(255,255,255,0.18);border-radius:4pt;padding:7pt 11pt;text-align:center;min-width:38pt;">
+        <div style="font-size:18pt;font-weight:700;color:white;line-height:1;">${meta.reportCount}</div>
+        <div style="font-size:7pt;color:#b5d4f4;text-transform:uppercase;letter-spacing:.5pt;margin-top:2pt;">Reports</div>
       </div>
-      <div style="background:rgba(255,255,255,0.15);border-radius:4px;padding:6px 10px;text-align:center;min-width:36px;">
-        <div style="font-size:16px;font-weight:700;color:white;">${meta.themeCount}</div>
-        <div style="font-size:7px;color:#b5d4f4;text-transform:uppercase;letter-spacing:.5px;">Themes</div>
+      <div style="background:rgba(255,255,255,0.18);border-radius:4pt;padding:7pt 11pt;text-align:center;min-width:38pt;">
+        <div style="font-size:18pt;font-weight:700;color:white;line-height:1;">${meta.themeCount}</div>
+        <div style="font-size:7pt;color:#b5d4f4;text-transform:uppercase;letter-spacing:.5pt;margin-top:2pt;">Themes</div>
       </div>
-      <div style="background:#faeeda;border-radius:4px;padding:6px 10px;text-align:center;min-width:56px;">
-        <div style="font-size:16px;font-weight:700;color:#854f0b;">${meta.closedActionCount}</div>
-        <div style="font-size:7px;color:#854f0b;text-transform:uppercase;letter-spacing:.5px;">Actions closed</div>
+      <div style="background:#faeeda;border-radius:4pt;padding:7pt 11pt;text-align:center;min-width:58pt;">
+        <div style="font-size:18pt;font-weight:700;color:#854f0b;line-height:1;">${meta.closedActionCount}</div>
+        <div style="font-size:7pt;color:#854f0b;text-transform:uppercase;letter-spacing:.5pt;margin-top:2pt;">Actions closed</div>
       </div>
     </div>
   </div>
 
   <!-- BODY -->
-  <div style="padding:12px 14px 10px;">
+  <div style="padding:12pt 14pt 10pt;">
     ${trendHtml}
     ${lessonsHtml}
     ${actionsHtml}
@@ -1441,9 +1443,9 @@ function BulletinsTab({ reports, actions, currentUser, onAudit }) {
   </div>
 
   <!-- FOOTER -->
-  <div style="border-top:2px solid #185fa5;padding:5px 14px;display:flex;justify-content:space-between;margin-top:4px;">
-    <span style="font-size:8px;color:#888;">LS Airmotive DTO.0258 &nbsp;·&nbsp; Oxford Airport EGTK &nbsp;·&nbsp; lsa-sms.vercel.app</span>
-    <span style="font-size:8px;color:#888;">Head of Training: T. Newell &nbsp; FE.466104D</span>
+  <div style="border-top:2pt solid #185fa5;padding:5pt 14pt;display:flex;justify-content:space-between;position:fixed;bottom:0;left:0;right:0;background:white;">
+    <span style="font-size:8pt;color:#888;">LS Airmotive DTO.0258 &nbsp;·&nbsp; Oxford Airport EGTK &nbsp;·&nbsp; lsa-sms.vercel.app</span>
+    <span style="font-size:8pt;color:#888;">Head of Training: T. Newell &nbsp; FE.466104D</span>
   </div>
 </body>
 </html>`;
