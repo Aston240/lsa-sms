@@ -1305,35 +1305,178 @@ function BulletinsTab({ reports, actions, currentUser, onAudit }) {
     setGenerating(true);
     setError("");
     try {
-      const res = await fetch("/api/generate-bulletin", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({
-          bulletin: draft,
-          meta: {
-            issueNumber,
-            dateFrom,
-            dateTo,
-            reportCount: reportsInRange.length,
-            themeCount: draft.themes?.length || 0,
-            closedActionCount: actionsInRange.length,
-          },
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "PDF generation failed");
+      const meta = {
+        issueNumber,
+        dateFrom,
+        dateTo,
+        reportCount: reportsInRange.length,
+        themeCount: draft.themes?.length || 0,
+        closedActionCount: actionsInRange.length,
+      };
 
-      // Download the PDF
-      const binary = atob(data.pdf);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      const blob = new Blob([bytes], { type: "application/pdf" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `LSA-Safety-Bulletin-Issue-${issueNumber}-${dateFrom}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
+      // Build HTML bulletin
+      const themes = draft.themes || [];
+      const acted = draft.whatWeActed || [];
+
+      const blockStyle = (bg, labelCol, bodyCol, borderCol) =>
+        `background:${bg};border-radius:6px;padding:11px 14px;margin-bottom:10px;${borderCol ? `border:1px solid ${borderCol};` : ""}`;
+
+      const label = (text, col) =>
+        `<div style="font-size:8px;font-weight:700;color:${col};text-transform:uppercase;letter-spacing:.8px;margin-bottom:5px;">${text}</div>`;
+
+      const body = (text, col) =>
+        `<div style="font-size:10px;color:${col};line-height:1.6;">${text}</div>`;
+
+      // Trend blocks — 2 column if multiple
+      let trendHtml = "";
+      if (themes.length === 1) {
+        const t = themes[0];
+        trendHtml = `<div style="${blockStyle("#0c2340","","","")}">
+          ${label(`Trend — ${t.category || ""}`, "#7eb8e8")}
+          ${body(t.trendSummary || "", "#ffffff")}
+        </div>`;
+      } else {
+        trendHtml = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+          ${themes.slice(0, 2).map((t, i) => `<div style="${blockStyle(i===0?"#0c2340":"#1e3a5f","","")}">
+            ${label(`Trend — ${t.category || ""}`, "#7eb8e8")}
+            ${body(t.trendSummary || "", "#ffffff")}
+          </div>`).join("")}
+        </div>`;
+        if (themes.length > 2) {
+          const t = themes[2];
+          trendHtml += `<div style="${blockStyle("#e6f1fb","","","")}">
+            ${label(`Further Trend — ${t.category || ""}`, "#185fa5")}
+            ${body(t.trendSummary || "", "#0c2340")}
+          </div>`;
+        }
+      }
+
+      // Lessons learned
+      let lessonsHtml = "";
+      if (themes.length === 1) {
+        lessonsHtml = `<div style="${blockStyle("#f1efe8","","","")}">
+          ${label("Lesson Learned", "#444441")}
+          ${body(themes[0].lessonLearned || "", "#5f5e5a")}
+        </div>`;
+      } else {
+        lessonsHtml = `<div style="display:grid;grid-template-columns:${themes.length >= 2 ? "1fr 1fr" : "1fr"};gap:8px;margin-bottom:10px;">
+          ${themes.slice(0, 2).map(t => `<div style="${blockStyle("#f1efe8","","","")}">
+            ${label(`Lesson Learned — ${t.title || ""}`, "#444441")}
+            ${body(t.lessonLearned || "", "#5f5e5a")}
+          </div>`).join("")}
+        </div>`;
+        if (themes.length > 2) {
+          lessonsHtml += `<div style="${blockStyle("#f1efe8","","","")}">
+            ${label("Lesson Learned", "#444441")}
+            ${body(themes[2].lessonLearned || "", "#5f5e5a")}
+          </div>`;
+        }
+      }
+
+      // Actions for pilots — combine all themes
+      const allActions = themes.map(t => (t.actionsForPilots || "").trim()).filter(Boolean).join("
+");
+      const actionsHtml = `<div style="${blockStyle("#eaf3de","","","")}">
+        ${label("Actions for Pilots", "#3b6d11")}
+        ${body(allActions.replace(/^[·•]/gm, "&#8226;").replace(/
+/g, "<br/>"), "#27500a")}
+      </div>`;
+
+      // What we acted
+      const actedHtml = acted.length > 0 ? `<div style="${blockStyle("#0c2340","","","")}">
+        ${label("You Reported — We Acted", "#7eb8e8")}
+        ${body(acted.map(a => `&#8226; ${a.change || ""}`).join("<br/>"), "#ffffff")}
+      </div>` : "";
+
+      const htmlContent = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8"/>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: Arial, sans-serif; background: white; width: 210mm; }
+  @media print {
+    body { width: 210mm; }
+    @page { size: A4; margin: 0; }
+  }
+</style>
+</head>
+<body>
+  <!-- HEADER -->
+  <div style="background:#185fa5;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;min-height:28mm;">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <div style="background:white;padding:5px 12px;border-radius:3px;">
+        <span style="font-size:14px;font-weight:900;color:#0c2340;letter-spacing:2px;">LS AIRMOTIVE</span>
+      </div>
+      <div style="width:1px;height:30px;background:rgba(255,255,255,0.3);"></div>
+      <div>
+        <div style="font-size:13px;font-weight:700;color:white;">Flight Safety Bulletin</div>
+        <div style="font-size:9px;color:#b5d4f4;">Issue ${meta.issueNumber} &nbsp;·&nbsp; ${meta.dateFrom} to ${meta.dateTo}</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:6px;">
+      <div style="background:rgba(255,255,255,0.15);border-radius:4px;padding:6px 10px;text-align:center;min-width:36px;">
+        <div style="font-size:16px;font-weight:700;color:white;">${meta.reportCount}</div>
+        <div style="font-size:7px;color:#b5d4f4;text-transform:uppercase;letter-spacing:.5px;">Reports</div>
+      </div>
+      <div style="background:rgba(255,255,255,0.15);border-radius:4px;padding:6px 10px;text-align:center;min-width:36px;">
+        <div style="font-size:16px;font-weight:700;color:white;">${meta.themeCount}</div>
+        <div style="font-size:7px;color:#b5d4f4;text-transform:uppercase;letter-spacing:.5px;">Themes</div>
+      </div>
+      <div style="background:#faeeda;border-radius:4px;padding:6px 10px;text-align:center;min-width:56px;">
+        <div style="font-size:16px;font-weight:700;color:#854f0b;">${meta.closedActionCount}</div>
+        <div style="font-size:7px;color:#854f0b;text-transform:uppercase;letter-spacing:.5px;">Actions closed</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BODY -->
+  <div style="padding:12px 14px 10px;">
+    ${trendHtml}
+    ${lessonsHtml}
+    ${actionsHtml}
+    ${actedHtml}
+  </div>
+
+  <!-- FOOTER -->
+  <div style="border-top:2px solid #185fa5;padding:5px 14px;display:flex;justify-content:space-between;margin-top:4px;">
+    <span style="font-size:8px;color:#888;">LS Airmotive DTO.0258 &nbsp;·&nbsp; Oxford Airport EGTK &nbsp;·&nbsp; lsa-sms.vercel.app</span>
+    <span style="font-size:8px;color:#888;">Head of Training: T. Newell &nbsp; FE.466104D</span>
+  </div>
+</body>
+</html>`;
+
+      // Use html2pdf.js loaded from CDN via a hidden iframe
+      await new Promise((resolve, reject) => {
+        const iframe = document.createElement("iframe");
+        iframe.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:210mm;height:297mm;";
+        document.body.appendChild(iframe);
+        iframe.onload = () => {
+          const iDoc = iframe.contentDocument || iframe.contentWindow.document;
+          iDoc.open();
+          iDoc.write(htmlContent);
+          iDoc.close();
+
+          const script = iDoc.createElement("script");
+          script.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
+          script.onload = () => {
+            const opt = {
+              margin: 0,
+              filename: `LSA-Safety-Bulletin-Issue-${issueNumber}-${dateFrom}.pdf`,
+              image: { type: "jpeg", quality: 0.98 },
+              html2canvas: { scale: 2, useCORS: true, logging: false },
+              jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+            };
+            iframe.contentWindow.html2pdf().set(opt).from(iDoc.body).save().then(() => {
+              document.body.removeChild(iframe);
+              resolve();
+            }).catch(reject);
+          };
+          script.onerror = reject;
+          iDoc.head.appendChild(script);
+        };
+        iframe.src = "about:blank";
+      });
 
       // Save to bulletin log
       const entry = {
