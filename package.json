@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "docx": "^8.5.0",
+    "jspdf": "^2.5.1",
     "next": "16.0.7",
     "react": "^18",
     "react-dom": "^18",
