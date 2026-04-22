@@ -1,264 +1,204 @@
 // PATH: app/api/generate-bulletin/route.js
 import { NextResponse } from "next/server";
-import { execSync } from "child_process";
-import { writeFileSync, readFileSync, unlinkSync } from "fs";
-import { join } from "path";
-import { tmpdir } from "os";
+import { jsPDF } from "jspdf";
+
+const NAVY = [12, 35, 64];
+const BLUE = [24, 95, 165];
+const LIGHTBLUE = [230, 241, 251];
+const MIDGRAY = [241, 239, 232];
+const GREEN = [234, 243, 222];
+const DARKGREEN = [39, 80, 10];
+const SUBTEXT = [95, 94, 90];
+const TEXTGRAY = [68, 68, 65];
+const WHITE = [255, 255, 255];
+const AMBER = [250, 238, 218];
+const AMBERTEXT = [133, 79, 11];
+
+function hex(rgb) { return rgb; }
 
 export async function POST(req) {
   try {
     const { bulletin, meta } = await req.json();
-    // bulletin = { themes, whatWeActed }
-    // meta = { issueNumber, dateFrom, dateTo, reportCount, closedActionCount }
+    const { themes = [], whatWeActed = [] } = bulletin;
+    const { issueNumber, dateFrom, dateTo, reportCount, themeCount, closedActionCount } = meta;
 
-    const dataPath = join(tmpdir(), `bulletin_data_${Date.now()}.json`);
-    const outPath = join(tmpdir(), `bulletin_${Date.now()}.pdf`);
+    // Use jsPDF via dynamic import
+    const { jsPDF } = await import("jspdf");
 
-    writeFileSync(dataPath, JSON.stringify({ bulletin, meta }));
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const W = 210;
+    const H = 297;
+    const ML = 14; // margin left
+    const MR = 14; // margin right
+    const CW = W - ML - MR; // content width
 
-    const script = `
-import json, sys, os
-from reportlab.lib.pagesizes import A4
-from reportlab.lib import colors
-from reportlab.lib.units import mm
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
-from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
+    const setColor = (rgb, type = "fill") => {
+      if (type === "fill") doc.setFillColor(rgb[0], rgb[1], rgb[2]);
+      else doc.setTextColor(rgb[0], rgb[1], rgb[2]);
+    };
 
-with open(${JSON.stringify(dataPath)}) as f:
-    data = json.load(f)
+    const setFont = (bold = false, size = 9) => {
+      doc.setFont("helvetica", bold ? "bold" : "normal");
+      doc.setFontSize(size);
+    };
 
-bulletin = data['bulletin']
-meta = data['meta']
+    // ── HEADER ──────────────────────────────────────────────────────────────
+    setColor(BLUE);
+    doc.rect(0, 0, W, 28, "F");
 
-NAVY = colors.HexColor('#0c2340')
-BLUE = colors.HexColor('#185fa5')
-LIGHTBLUE = colors.HexColor('#e6f1fb')
-DARKGRAY = colors.HexColor('#0c2340')
-MIDGRAY = colors.HexColor('#f1efe8')
-GREEN = colors.HexColor('#eaf3de')
-DARKGREEN = colors.HexColor('#27500a')
-TEXTGRAY = colors.HexColor('#444441')
-SUBTEXT = colors.HexColor('#5f5e5a')
-WHITE = colors.white
+    // White logo box
+    setColor(WHITE);
+    doc.roundedRect(ML, 8, 52, 12, 1.5, 1.5, "F");
+    setColor(NAVY, "text");
+    setFont(true, 11);
+    doc.text("LS AIRMOTIVE", ML + 4, 16.5);
 
-W, H = A4
-doc = SimpleDocTemplate(
-    ${JSON.stringify(outPath)},
-    pagesize=A4,
-    leftMargin=14*mm, rightMargin=14*mm,
-    topMargin=0*mm, bottomMargin=10*mm
-)
+    // Divider
+    setColor([255, 255, 255]);
+    doc.setFillColor(255, 255, 255);
+    doc.setGState && doc.setGState(doc.GState ? doc.GState({ opacity: 0.3 }) : {});
+    doc.rect(70, 5, 0.4, 18, "F");
 
-def header_footer(canvas, doc):
-    canvas.saveState()
-    # Full-width navy header bar
-    canvas.setFillColor(BLUE)
-    canvas.rect(0, H - 28*mm, W, 28*mm, fill=1, stroke=0)
+    // Title text
+    setColor(WHITE, "text");
+    setFont(true, 13);
+    doc.text("Flight Safety Bulletin", 75, 13);
+    setFont(false, 8);
+    doc.setTextColor(181, 212, 244);
+    doc.text(`Issue ${issueNumber}  ·  ${dateFrom} to ${dateTo}`, 75, 20);
 
-    # White logo box
-    canvas.setFillColor(WHITE)
-    canvas.roundRect(14*mm, H - 22*mm, 52*mm, 12*mm, 2, fill=1, stroke=0)
-    canvas.setFillColor(NAVY)
-    canvas.setFont('Helvetica-Bold', 11)
-    canvas.drawString(17*mm, H - 17.5*mm, 'LS AIRMOTIVE')
+    // Stats boxes
+    const stats = [
+      { val: String(reportCount), label: "REPORTS", amber: false },
+      { val: String(themeCount), label: "THEMES", amber: false },
+      { val: String(closedActionCount), label: "ACTIONS CLOSED", amber: true },
+    ];
+    let bx = W - MR;
+    const bw = 28, bh = 16, bgap = 2;
+    for (let i = stats.length - 1; i >= 0; i--) {
+      bx -= bw;
+      const by = 6;
+      if (stats[i].amber) {
+        doc.setFillColor(250, 238, 218);
+      } else {
+        doc.setFillColor(255, 255, 255, 0.15);
+        doc.setFillColor(40, 80, 130);
+      }
+      doc.roundedRect(bx, by, bw, bh, 1.5, 1.5, "F");
+      if (stats[i].amber) {
+        doc.setTextColor(133, 79, 11);
+      } else {
+        doc.setTextColor(255, 255, 255);
+      }
+      setFont(true, 12);
+      doc.text(stats[i].val, bx + bw / 2, by + 8, { align: "center" });
+      setFont(false, 6.5);
+      doc.text(stats[i].label, bx + bw / 2, by + 13, { align: "center" });
+      bx -= bgap;
+    }
 
-    # Divider line
-    canvas.setFillColor(colors.HexColor('#ffffff44'))
-    canvas.rect(70*mm, H - 24*mm, 0.4*mm, 20*mm, fill=1, stroke=0)
+    // ── CONTENT ──────────────────────────────────────────────────────────────
+    let y = 34; // start below header
+    const PAD = 3.5;
+    const LINE_H = 5;
 
-    # Bulletin title
-    canvas.setFillColor(WHITE)
-    canvas.setFont('Helvetica-Bold', 13)
-    canvas.drawString(75*mm, H - 16*mm, 'Flight Safety Bulletin')
-    canvas.setFillColor(colors.HexColor('#b5d4f4'))
-    canvas.setFont('Helvetica', 9)
-    issue_text = 'Issue ' + str(meta.get('issueNumber','—')) + '  ·  ' + str(meta.get('dateFrom','')) + ' to ' + str(meta.get('dateTo',''))
-    canvas.drawString(75*mm, H - 22*mm, issue_text)
+    function measureText(text, maxW, fontSize) {
+      setFont(false, fontSize);
+      const lines = doc.splitTextToSize(text, maxW - PAD * 2);
+      return lines.length * (fontSize * 0.352778 * 1.4) + PAD * 2;
+    }
 
-    # Stats boxes top right
-    stats = [
-        (str(meta.get('reportCount', 0)), 'Reports'),
-        (str(meta.get('themeCount', 0)), 'Themes'),
-        (str(meta.get('closedActionCount', 0)), 'Actions closed'),
-    ]
-    x_start = W - 14*mm
-    box_w = 28*mm
-    box_h = 16*mm
-    gap = 2*mm
-    for i, (val, label) in enumerate(reversed(stats)):
-        bx = x_start - (i+1)*(box_w + gap)
-        by = H - 26*mm
-        is_actions = label == 'Actions closed'
-        bg = colors.HexColor('#faeeda') if is_actions else colors.HexColor('#ffffff26')
-        canvas.setFillColor(bg)
-        canvas.roundRect(bx, by, box_w, box_h, 2, fill=1, stroke=0)
-        val_color = colors.HexColor('#854f0b') if is_actions else WHITE
-        label_color = colors.HexColor('#854f0b') if is_actions else colors.HexColor('#b5d4f4')
-        canvas.setFillColor(val_color)
-        canvas.setFont('Helvetica-Bold', 14)
-        canvas.drawCentredString(bx + box_w/2, by + 8*mm, val)
-        canvas.setFillColor(label_color)
-        canvas.setFont('Helvetica', 7)
-        canvas.drawCentredString(bx + box_w/2, by + 3*mm, label.upper())
+    function colorBlock(x, blockW, yPos, bgRgb, labelText, bodyText, labelRgb, bodyRgb, bold = false) {
+      const fontSize = 9;
+      const labelSize = 7.5;
+      setFont(false, fontSize);
+      const bodyLines = doc.splitTextToSize(bodyText || "", blockW - PAD * 2);
+      const labelLines = doc.splitTextToSize(labelText || "", blockW - PAD * 2);
+      const bodyH = bodyLines.length * (fontSize * 0.352778 * 1.5);
+      const labelH = labelLines.length * (labelSize * 0.352778 * 1.4);
+      const blockH = PAD + labelH + 2 + bodyH + PAD;
 
-    # Footer
-    canvas.setFillColor(SUBTEXT)
-    canvas.setFont('Helvetica', 7.5)
-    canvas.drawString(14*mm, 6*mm, 'LS Airmotive DTO.0258  ·  Oxford Airport EGTK  ·  lsa-sms.vercel.app')
-    canvas.setFont('Helvetica', 7.5)
-    canvas.drawRightString(W - 14*mm, 6*mm, 'Head of Training: T. Newell  FE.466104D')
-    canvas.setFillColor(BLUE)
-    canvas.rect(0, 4*mm, W, 0.8*mm, fill=1, stroke=0)
-    canvas.restoreState()
+      doc.setFillColor(bgRgb[0], bgRgb[1], bgRgb[2]);
+      doc.roundedRect(x, yPos, blockW, blockH, 2, 2, "F");
 
-story = []
-story.append(Spacer(1, 30*mm))  # space for header
+      let ty = yPos + PAD + labelSize * 0.352778;
+      doc.setTextColor(labelRgb[0], labelRgb[1], labelRgb[2]);
+      setFont(true, labelSize);
+      doc.text(labelText.toUpperCase(), x + PAD, ty);
+      ty += labelH + 1.5;
 
-themes = bulletin.get('themes', [])
-acted = bulletin.get('whatWeActed', [])
+      doc.setTextColor(bodyRgb[0], bodyRgb[1], bodyRgb[2]);
+      setFont(false, fontSize);
+      doc.text(bodyLines, x + PAD, ty);
 
-CONTENT_W = W - 28*mm
+      return blockH;
+    }
 
-def make_style(name, size=9, leading=13, color=TEXTGRAY, bold=False, align=TA_LEFT, space_before=0, space_after=4):
-    return ParagraphStyle(
-        name,
-        fontName='Helvetica-Bold' if bold else 'Helvetica',
-        fontSize=size,
-        leading=leading,
-        textColor=color,
-        alignment=align,
-        spaceBefore=space_before,
-        spaceAfter=space_after,
-    )
+    const GAP = 3;
 
-label_style = make_style('label', size=7.5, color=colors.HexColor('#185fa5'), bold=True, space_before=0, space_after=3)
-body_style = make_style('body', size=9, leading=14, color=SUBTEXT)
-white_label = make_style('wlabel', size=7.5, color=colors.HexColor('#7eb8e8'), bold=True, space_before=0, space_after=3)
-white_body = make_style('wbody', size=9, leading=14, color=WHITE)
-green_label = make_style('glabel', size=7.5, color=colors.HexColor('#3b6d11'), bold=True, space_before=0, space_after=3)
-green_body = make_style('gbody', size=9, leading=14, color=DARKGREEN)
+    if (themes.length === 1) {
+      const th = themes[0];
+      let bh = colorBlock(ML, CW, y, NAVY, `Trend — ${th.category || ""}`, th.trendSummary || "", [126, 184, 232], WHITE);
+      y += bh + GAP;
+      bh = colorBlock(ML, CW, y, MIDGRAY, "Lesson Learned", th.lessonLearned || "", TEXTGRAY, SUBTEXT);
+      y += bh + GAP;
+      bh = colorBlock(ML, CW, y, GREEN, "Actions for Pilots", (th.actionsForPilots || "").replace(/^·/gm, "\u2022"), DARKGREEN, DARKGREEN);
+      y += bh + GAP;
+    } else {
+      const hw = (CW - GAP) / 2;
 
-def color_block(bg, label_text, body_text, lbl_style, bdy_style, border_color=None):
-    inner = [
-        Paragraph(label_text.upper(), lbl_style),
-        Paragraph(body_text, bdy_style),
-    ]
-    ts = [
-        ('BACKGROUND', (0,0), (-1,-1), bg),
-        ('ROUNDEDCORNERS', [4,4,4,4]),
-        ('TOPPADDING', (0,0), (-1,-1), 8),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 8),
-        ('LEFTPADDING', (0,0), (-1,-1), 10),
-        ('RIGHTPADDING', (0,0), (-1,-1), 10),
-    ]
-    if border_color:
-        ts.append(('BOX', (0,0), (-1,-1), 0.5, border_color))
-    t = Table([[inner]], colWidths=[CONTENT_W])
-    t.setStyle(TableStyle(ts))
-    return t
-
-# Render themes — two per row if multiple
-if len(themes) == 1:
-    th = themes[0]
-    story.append(color_block(NAVY, 'Trend — ' + th.get('category',''), th.get('trendSummary',''), white_label, white_body))
-    story.append(Spacer(1, 3*mm))
-    story.append(color_block(MIDGRAY, 'Lesson learned', th.get('lessonLearned',''), make_style('ml', size=7.5, color=TEXTGRAY, bold=True, space_after=3), make_style('mb', size=9, leading=14, color=SUBTEXT)))
-    story.append(Spacer(1, 3*mm))
-    story.append(color_block(GREEN, 'Actions for pilots', th.get('actionsForPilots','').replace('·', '&#8226;'), green_label, green_body))
-    story.append(Spacer(1, 3*mm))
-elif len(themes) >= 2:
-    # Two trend boxes side by side
-    half_w = (CONTENT_W - 4*mm) / 2
-    row_cells = []
-    for th in themes[:2]:
-        inner = [
-            Paragraph(('Trend — ' + th.get('category','')).upper(), white_label),
-            Paragraph(th.get('trendSummary',''), white_body),
-        ]
-        ts = [
-            ('BACKGROUND', (0,0), (-1,-1), NAVY),
-            ('TOPPADDING', (0,0), (-1,-1), 8),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 8),
-            ('LEFTPADDING', (0,0), (-1,-1), 10),
-            ('RIGHTPADDING', (0,0), (-1,-1), 10),
-        ]
-        t = Table([[inner]], colWidths=[half_w])
-        t.setStyle(TableStyle(ts))
-        row_cells.append(t)
-    trend_row = Table([row_cells], colWidths=[half_w, half_w], hAlign='LEFT')
-    trend_row.setStyle(TableStyle([('LEFTPADDING',(0,0),(-1,-1),0),('RIGHTPADDING',(0,0),(-1,-1),0),('TOPPADDING',(0,0),(-1,-1),0),('BOTTOMPADDING',(0,0),(-1,-1),0),('COLPADDING',(0,0),(-1,-1),2*mm)]))
-    story.append(trend_row)
-    story.append(Spacer(1, 3*mm))
-
-    # Lessons learned side by side
-    lesson_cells = []
-    for i, th in enumerate(themes[:2]):
-        inner = [
-            Paragraph(('Lesson learned' + (' — ' + th.get('title','') if len(themes)>1 else '')).upper(), make_style('ll'+str(i), size=7.5, color=TEXTGRAY, bold=True, space_after=3)),
-            Paragraph(th.get('lessonLearned',''), make_style('lb'+str(i), size=9, leading=14, color=SUBTEXT)),
-        ]
-        ts = [('BACKGROUND',(0,0),(-1,-1),MIDGRAY),('TOPPADDING',(0,0),(-1,-1),8),('BOTTOMPADDING',(0,0),(-1,-1),8),('LEFTPADDING',(0,0),(-1,-1),10),('RIGHTPADDING',(0,0),(-1,-1),10)]
-        t = Table([[inner]], colWidths=[half_w])
-        t.setStyle(TableStyle(ts))
-        lesson_cells.append(t)
-    lesson_row = Table([lesson_cells], colWidths=[half_w, half_w], hAlign='LEFT')
-    lesson_row.setStyle(TableStyle([('LEFTPADDING',(0,0),(-1,-1),0),('RIGHTPADDING',(0,0),(-1,-1),0),('TOPPADDING',(0,0),(-1,-1),0),('BOTTOMPADDING',(0,0),(-1,-1),0),('COLPADDING',(0,0),(-1,-1),2*mm)]))
-    story.append(lesson_row)
-    story.append(Spacer(1, 3*mm))
-
-    # Combined pilot actions
-    combined_actions = ''
-    for th in themes[:2]:
-        combined_actions += th.get('actionsForPilots','') + '\n'
-    story.append(color_block(GREEN, 'Actions for pilots', combined_actions.strip().replace('·','&#8226;'), green_label, green_body))
-    story.append(Spacer(1, 3*mm))
-
-    # Third theme on next section if exists
-    if len(themes) > 2:
-        th = themes[2]
-        story.append(color_block(LIGHTBLUE, 'Further trend — ' + th.get('category',''), th.get('trendSummary',''), make_style('ft', size=7.5, color=BLUE, bold=True, space_after=3), make_style('fb', size=9, leading=14, color=NAVY)))
-        story.append(Spacer(1, 2*mm))
-        story.append(color_block(MIDGRAY, 'Lesson learned', th.get('lessonLearned',''), make_style('fl', size=7.5, color=TEXTGRAY, bold=True, space_after=3), make_style('flb', size=9, leading=14, color=SUBTEXT)))
-        story.append(Spacer(1, 2*mm))
-        story.append(color_block(GREEN, 'Additional actions for pilots', th.get('actionsForPilots','').replace('·','&#8226;'), green_label, green_body))
-        story.append(Spacer(1, 3*mm))
-
-# What we acted section
-if acted:
-    acted_text = '<br/>'.join(['&#8226; <b>' + a.get('change','').split(':')[0] + (':</b> ' + ':'.join(a.get('change','').split(':')[1:]) if ':' in a.get('change','') else '</b>') for a in acted])
-    story.append(color_block(NAVY, 'You reported — we acted', acted_text,
-        make_style('ya', size=7.5, color=colors.HexColor('#7eb8e8'), bold=True, space_after=3),
-        make_style('yb', size=9, leading=14, color=WHITE)))
-
-doc.build(story, onFirstPage=header_footer, onLaterPages=header_footer)
-print("OK:" + ${JSON.stringify(outPath)})
-`;
-
-    const scriptPath = join(tmpdir(), `gen_bulletin_${Date.now()}.py`);
-    writeFileSync(scriptPath, script);
-
-    let output;
-    try {
-      output = execSync(`pip install reportlab --break-system-packages -q && python3 "${scriptPath}"`, {
-        timeout: 60000,
-        encoding: "utf8",
+      // Trend boxes side by side
+      let maxH = 0;
+      const trendHeights = themes.slice(0, 2).map((th, i) => {
+        const bh = colorBlock(ML + i * (hw + GAP), hw, y, NAVY, `Trend — ${th.category || ""}`, th.trendSummary || "", [126, 184, 232], WHITE);
+        if (bh > maxH) maxH = bh;
+        return bh;
       });
-    } catch (e) {
-      console.error("Python error:", e.stdout, e.stderr);
-      return NextResponse.json({ error: "PDF generation failed: " + (e.stderr || e.message) }, { status: 500 });
+      y += maxH + GAP;
+
+      // Lesson learned side by side
+      maxH = 0;
+      themes.slice(0, 2).forEach((th, i) => {
+        const label = themes.length > 1 ? `Lesson Learned — ${th.title || ""}` : "Lesson Learned";
+        const bh = colorBlock(ML + i * (hw + GAP), hw, y, MIDGRAY, label, th.lessonLearned || "", TEXTGRAY, SUBTEXT);
+        if (bh > maxH) maxH = bh;
+      });
+      y += maxH + GAP;
+
+      // Combined pilot actions
+      const combined = themes.slice(0, 2).map(th => (th.actionsForPilots || "").trim()).join("\n");
+      let bh = colorBlock(ML, CW, y, GREEN, "Actions for Pilots", combined.replace(/^·/gm, "\u2022"), DARKGREEN, DARKGREEN);
+      y += bh + GAP;
+
+      // Third theme if exists
+      if (themes.length > 2) {
+        const th = themes[2];
+        bh = colorBlock(ML, CW, y, LIGHTBLUE, `Further Trend — ${th.category || ""}`, th.trendSummary || "", BLUE, NAVY);
+        y += bh + GAP;
+        bh = colorBlock(ML, CW, y, MIDGRAY, "Lesson Learned", th.lessonLearned || "", TEXTGRAY, SUBTEXT);
+        y += bh + GAP;
+        bh = colorBlock(ML, CW, y, GREEN, "Additional Actions for Pilots", (th.actionsForPilots || "").replace(/^·/gm, "\u2022"), DARKGREEN, DARKGREEN);
+        y += bh + GAP;
+      }
     }
 
-    if (!output.includes("OK:")) {
-      return NextResponse.json({ error: "PDF generation failed — no output path returned" }, { status: 500 });
+    // What we acted
+    if (whatWeActed && whatWeActed.length > 0) {
+      const actedText = whatWeActed.map(a => `\u2022 ${a.change || ""}`).join("\n");
+      colorBlock(ML, CW, y, NAVY, "You Reported — We Acted", actedText, [126, 184, 232], WHITE);
     }
 
-    const pdfBuffer = readFileSync(outPath);
-    const base64 = pdfBuffer.toString("base64");
+    // ── FOOTER ───────────────────────────────────────────────────────────────
+    doc.setFillColor(BLUE[0], BLUE[1], BLUE[2]);
+    doc.rect(0, H - 8, W, 1, "F");
+    doc.setTextColor(SUBTEXT[0], SUBTEXT[1], SUBTEXT[2]);
+    setFont(false, 7.5);
+    doc.text("LS Airmotive DTO.0258  \u00B7  Oxford Airport EGTK  \u00B7  lsa-sms.vercel.app", ML, H - 4);
+    doc.text("Head of Training: T. Newell  FE.466104D", W - MR, H - 4, { align: "right" });
 
-    try { unlinkSync(dataPath); unlinkSync(scriptPath); unlinkSync(outPath); } catch {}
+    const pdfBase64 = doc.output("datauristring").split(",")[1];
+    return NextResponse.json({ ok: true, pdf: pdfBase64 });
 
-    return NextResponse.json({ ok: true, pdf: base64 });
   } catch (err) {
     console.error("generate-bulletin error:", err);
     return NextResponse.json({ error: err.message }, { status: 500 });
