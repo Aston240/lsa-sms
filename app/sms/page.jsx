@@ -1374,7 +1374,8 @@ function BulletinsTab({ reports, actions, currentUser, onAudit }) {
       }
 
       // Actions for pilots — combine all themes
-      const allActions = themes.map(t => (t.actionsForPilots || "").trim()).filter(Boolean).join("\n");
+      const toStr = v => Array.isArray(v) ? v.join("\n") : (v || "");
+      const allActions = themes.map(t => toStr(t.actionsForPilots).trim()).filter(Boolean).join("\n");
       const actionsHtml = `<div style="${blockStyle("#eaf3de","","","")}">
         ${label("Actions for Pilots", "#3b6d11")}
         ${body(allActions.replace(/^[\u00b7\u2022]/gm, "&#8226;").replace(/\n/g, "<br/>"), "#27500a")}
@@ -1602,7 +1603,7 @@ function BulletinsTab({ reports, actions, currentUser, onAudit }) {
                 </div>
                 <div>
                   <label style={{ fontSize: 10, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: ".8px", display: "block", marginBottom: 4 }}>Actions for Pilots (one per line, start each with ·)</label>
-                  <textarea value={theme.actionsForPilots || ""} onChange={e => updateTheme(i, "actionsForPilots", e.target.value)} rows={4} style={taStyle} />
+                  <textarea value={Array.isArray(theme.actionsForPilots) ? theme.actionsForPilots.join("\n") : (theme.actionsForPilots || "")} onChange={e => updateTheme(i, "actionsForPilots", e.target.value)} rows={4} style={taStyle} />
                 </div>
               </div>
             </div>
