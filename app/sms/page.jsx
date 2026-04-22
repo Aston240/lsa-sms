@@ -1220,6 +1220,274 @@ function AIAnalysis({ reports, risks, actions }) {
   );
 }
 
+
+// ── Bulletins Tab ─────────────────────────────────────────────────────────────
+function BulletinsTab({ reports, actions, currentUser, onAudit }) {
+  const [dateFrom, setDateFrom] = useState(() => {
+    const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10);
+  });
+  const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [drafting, setDrafting] = useState(false);
+  const [draft, setDraft] = useState(null);
+  const [generating, setGenerating] = useState(false);
+  const [bulletinLog, setBulletinLog] = useState([]);
+  const [showLog, setShowLog] = useState(false);
+  const [error, setError] = useState("");
+  const [issueNumber, setIssueNumber] = useState(1);
+
+  useEffect(() => {
+    loadFromStorage("sms:bulletins", []).then(b => {
+      if (Array.isArray(b)) {
+        setBulletinLog(b);
+        setIssueNumber(b.length + 1);
+      }
+    });
+  }, []);
+
+  const reportsInRange = reports.filter(r =>
+    !r.deletedAt &&
+    r.incidentDate >= dateFrom &&
+    r.incidentDate <= dateTo
+  );
+
+  const actionsInRange = actions.filter(a =>
+    !a.deletedAt &&
+    a.status === "Closed" &&
+    a.closedDate &&
+    a.closedDate >= dateFrom &&
+    a.closedDate <= dateTo
+  );
+
+  const runDraft = async () => {
+    if (reportsInRange.length === 0) return alert("No reports in this date range.");
+    setDrafting(true);
+    setError("");
+    setDraft(null);
+    try {
+      const res = await fetch("/api/ai-bulletin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({
+          reports: reportsInRange,
+          actions: actionsInRange,
+          dateFrom, dateTo,
+          issueNumber,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Draft failed");
+      setDraft(data.bulletin);
+    } catch (err) {
+      setError(err.message);
+    }
+    setDrafting(false);
+  };
+
+  const updateTheme = (i, field, value) => {
+    setDraft(prev => ({
+      ...prev,
+      themes: prev.themes.map((t, idx) => idx === i ? { ...t, [field]: value } : t),
+    }));
+  };
+
+  const updateActed = (i, value) => {
+    setDraft(prev => ({
+      ...prev,
+      whatWeActed: prev.whatWeActed.map((a, idx) => idx === i ? { ...a, change: value } : a),
+    }));
+  };
+
+  const removeTheme = (i) => setDraft(prev => ({ ...prev, themes: prev.themes.filter((_, idx) => idx !== i) }));
+  const removeActed = (i) => setDraft(prev => ({ ...prev, whatWeActed: prev.whatWeActed.filter((_, idx) => idx !== i) }));
+  const addActed = () => setDraft(prev => ({ ...prev, whatWeActed: [...(prev.whatWeActed || []), { change: "" }] }));
+
+  const generatePDF = async () => {
+    setGenerating(true);
+    setError("");
+    try {
+      const res = await fetch("/api/generate-bulletin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({
+          bulletin: draft,
+          meta: {
+            issueNumber,
+            dateFrom,
+            dateTo,
+            reportCount: reportsInRange.length,
+            themeCount: draft.themes?.length || 0,
+            closedActionCount: actionsInRange.length,
+          },
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "PDF generation failed");
+
+      // Download the PDF
+      const binary = atob(data.pdf);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `LSA-Safety-Bulletin-Issue-${issueNumber}-${dateFrom}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      // Save to bulletin log
+      const entry = {
+        id: `bulletin_${Date.now()}`,
+        issueNumber,
+        dateFrom,
+        dateTo,
+        reportCount: reportsInRange.length,
+        themeCount: draft.themes?.length || 0,
+        themes: draft.themes?.map(t => t.title) || [],
+        generatedAt: new Date().toISOString(),
+        generatedBy: currentUser?.name || "Unknown",
+      };
+      const newLog = [...bulletinLog, entry];
+      setBulletinLog(newLog);
+      setIssueNumber(prev => prev + 1);
+      await saveToStorage("sms:bulletins", newLog);
+      onAudit("BULLETIN_GENERATED", "Bulletins", `Generated bulletin issue ${issueNumber} covering ${dateFrom} to ${dateTo}`, String(issueNumber));
+
+      setDraft(null);
+    } catch (err) {
+      setError(err.message);
+    }
+    setGenerating(false);
+  };
+
+  const taStyle = { ...inputStyle, resize: "vertical", lineHeight: 1.6, fontSize: 12 };
+
+  return (
+    <div style={{ maxWidth: 860 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexWrap: "wrap", gap: 10 }}>
+        <h2 style={{ ...h2Style, marginBottom: 0 }}>📰 Safety Bulletins</h2>
+        <button onClick={() => setShowLog(v => !v)} style={{ ...btnSmall, background: showLog ? "#0ea5e922" : "#1e293b", color: showLog ? "#38bdf8" : "#94a3b8", border: showLog ? "1px solid #0ea5e944" : "1px solid #334155" }}>
+          📋 Bulletin Log ({bulletinLog.length})
+        </button>
+      </div>
+
+      {showLog && (
+        <div style={{ marginBottom: 24 }}>
+          {bulletinLog.length === 0 ? (
+            <div style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 10, padding: 20, color: "#475569", fontSize: 13 }}>No bulletins generated yet.</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {[...bulletinLog].reverse().map(b => (
+                <div key={b.id} style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 10, padding: "14px 18px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0" }}>Issue {b.issueNumber} — {b.dateFrom} to {b.dateTo}</div>
+                    <div style={{ fontSize: 11, color: "#475569", marginTop: 3 }}>{b.reportCount} reports · {b.themeCount} themes · Generated {fmt(b.generatedAt)} by {b.generatedBy}</div>
+                    {b.themes?.length > 0 && <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>{b.themes.join(" · ")}</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Date range selector */}
+      {!draft && (
+        <div style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 10, padding: "20px", marginBottom: 20 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", letterSpacing: "1px", textTransform: "uppercase", marginBottom: 14 }}>New Bulletin</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 12, alignItems: "end" }}>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: ".8px", textTransform: "uppercase", display: "block", marginBottom: 4 }}>Date From</label>
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={inputStyle} />
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: ".8px", textTransform: "uppercase", display: "block", marginBottom: 4 }}>Date To</label>
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inputStyle} />
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: ".8px", textTransform: "uppercase", display: "block", marginBottom: 4 }}>Issue Number</label>
+              <input type="number" value={issueNumber} onChange={e => setIssueNumber(Number(e.target.value))} style={inputStyle} min={1} />
+            </div>
+            <button onClick={runDraft} disabled={drafting} style={{ ...btnPrimary, background: "#7c3aed", whiteSpace: "nowrap" }}>
+              {drafting ? "🤖 Drafting…" : "🤖 Draft Bulletin"}
+            </button>
+          </div>
+          <div style={{ marginTop: 12, fontSize: 12, color: "#475569" }}>
+            {reportsInRange.length} reports in range · {actionsInRange.length} actions closed in range
+            {reportsInRange.length === 0 && dateFrom && dateTo && <span style={{ color: "#ef4444", marginLeft: 8 }}>⚠ No reports in this range</span>}
+          </div>
+          {error && <div style={{ marginTop: 10, fontSize: 12, color: "#fca5a5", background: "#450a0a", border: "1px solid #ef444433", borderRadius: 6, padding: "8px 12px" }}>⚠ {error}</div>}
+        </div>
+      )}
+
+      {/* Draft editor */}
+      {draft && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={{ background: "#0f172a", border: "1px solid #7c3aed44", borderRadius: 10, padding: "14px 18px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#a78bfa" }}>🤖 AI Draft Ready — Issue {issueNumber}</div>
+              <div style={{ fontSize: 11, color: "#475569", marginTop: 2 }}>{draft.themes?.length || 0} theme{draft.themes?.length !== 1 ? "s" : ""} identified · {reportsInRange.length} reports · {actionsInRange.length} actions closed</div>
+              {draft.seriousFlag && <div style={{ fontSize: 11, color: "#ef4444", marginTop: 4 }}>⚠ Serious flag: {draft.seriousFlagReason}</div>}
+            </div>
+            <button onClick={() => setDraft(null)} style={btnSmall}>✕ Start Over</button>
+          </div>
+
+          {/* Theme editors */}
+          {draft.themes?.map((theme, i) => (
+            <div key={i} style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 10, padding: "18px 20px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#38bdf8", textTransform: "uppercase", letterSpacing: ".8px" }}>Theme {i + 1}</div>
+                <button onClick={() => removeTheme(i)} style={{ ...btnSmall, background: "#ef444422", color: "#ef4444", border: "1px solid #ef444444", fontSize: 10 }}>Remove</button>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div>
+                  <label style={{ fontSize: 10, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: ".8px", display: "block", marginBottom: 4 }}>Theme Title</label>
+                  <input value={theme.title || ""} onChange={e => updateTheme(i, "title", e.target.value)} style={inputStyle} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: ".8px", display: "block", marginBottom: 4 }}>Trend Summary</label>
+                  <textarea value={theme.trendSummary || ""} onChange={e => updateTheme(i, "trendSummary", e.target.value)} rows={3} style={taStyle} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: ".8px", display: "block", marginBottom: 4 }}>Lesson Learned</label>
+                  <textarea value={theme.lessonLearned || ""} onChange={e => updateTheme(i, "lessonLearned", e.target.value)} rows={2} style={taStyle} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: ".8px", display: "block", marginBottom: 4 }}>Actions for Pilots (one per line, start each with ·)</label>
+                  <textarea value={theme.actionsForPilots || ""} onChange={e => updateTheme(i, "actionsForPilots", e.target.value)} rows={4} style={taStyle} />
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {/* What we acted */}
+          <div style={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: 10, padding: "18px 20px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#38bdf8", textTransform: "uppercase", letterSpacing: ".8px" }}>You Reported — We Acted</div>
+              <button onClick={addActed} style={{ ...btnSmall, background: "#22c55e22", color: "#22c55e", border: "1px solid #22c55e44" }}>＋ Add</button>
+            </div>
+            {(!draft.whatWeActed || draft.whatWeActed.length === 0) && (
+              <div style={{ fontSize: 12, color: "#475569" }}>No closed actions in this period — or none that represent an operational change. Add manually if needed.</div>
+            )}
+            {draft.whatWeActed?.map((a, i) => (
+              <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "flex-start" }}>
+                <input value={a.change || ""} onChange={e => updateActed(i, e.target.value)} style={{ ...inputStyle, flex: 1 }} placeholder="e.g. Taxi instructions updated: hold short of Alpha rather than taxi to school line" />
+                <button onClick={() => removeActed(i)} style={{ ...btnSmall, background: "#ef444422", color: "#ef4444", border: "1px solid #ef444444", flexShrink: 0 }}>✕</button>
+              </div>
+            ))}
+          </div>
+
+          {error && <div style={{ fontSize: 12, color: "#fca5a5", background: "#450a0a", border: "1px solid #ef444433", borderRadius: 6, padding: "8px 12px" }}>⚠ {error}</div>}
+
+          <button onClick={generatePDF} disabled={generating} style={{ ...btnPrimary, background: generating ? "#334155" : "#185fa5", fontSize: 14, padding: "14px 32px" }}>
+            {generating ? "⏳ Generating PDF…" : "📄 Generate & Download PDF"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Team Members ─────────────────────────────────────────────────────────────
 function TeamMembers({ team, setTeam, actions }) {
   const blank = { name: "", email: "" };
@@ -1718,6 +1986,7 @@ export default function App() {
     { id: "backups", label: "🔄 Backups" },
     { id: "export", label: "📤 Export" },
     { id: "analysis", label: "🤖 AI Analysis" },
+    { id: "bulletins", label: "📰 Bulletins" },
     { id: "team", label: "👥 Team Members" },
     ...(isAdmin ? [{ id: "users", label: "👤 Users" }, { id: "auditlog", label: "📜 Audit Log" }] : []),
   ];
@@ -1763,6 +2032,7 @@ export default function App() {
         {tab === "export" && <ExportTab reports={reports} risks={risks} actions={actions} />}
         {tab === "analysis" && <AIAnalysis reports={reports} risks={risks} actions={actions} />}
         {tab === "team" && <TeamMembers team={team} setTeam={setTeam} actions={actions} />}
+        {tab === "bulletins" && isAdmin && <BulletinsTab reports={reports} actions={actions} currentUser={currentUser} onAudit={onAudit} />}
         {tab === "users" && isAdmin && <UsersTab currentUser={currentUser} onAudit={onAudit} />}
         {tab === "auditlog" && isAdmin && <AuditLogTab />}
       </div>
