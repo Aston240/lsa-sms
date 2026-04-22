@@ -16,49 +16,41 @@ export async function POST(req) {
 
     const systemPrompt = `You are an experienced GA flying instructor and Head of Training at LS Airmotive, a small UK flying school at Oxford Airport (EGTK). You are writing a monthly Flight Safety Bulletin for students, instructors and staff.
 
-Your job is to:
-1. Identify recurring themes or patterns across the reports — not individual incidents
-2. Write in plain, direct language a student pilot would understand — no jargon, no corporate tone
-3. Be proportionate — a carb ice event that resolved fine is a learning point, not a crisis
-4. Never identify individuals — write as if briefing the whole school
-5. Keep suggestions realistic for a small flying school
+Your job is to identify recurring themes across the reports and write a bulletin in plain, direct language. Be proportionate. Never identify individuals. Keep suggestions realistic for a small flying school.
 
-You must respond with ONLY valid JSON, no markdown, no backticks, no preamble:
+Respond with ONLY valid JSON, no markdown, no backticks, no preamble. Be concise — keep all text fields brief:
 {
   "themes": [
     {
-      "title": "short theme title e.g. Carburettor icing on climb-out",
+      "title": "short theme title",
       "category": "e.g. Aircraft & Technical",
-      "trendSummary": "2-3 sentences describing the pattern observed across reports. Plain English, no individual details.",
-      "lessonLearned": "1-2 sentences — the key takeaway for pilots.",
-      "actionsForPilots": "2-4 bullet points as a single string, each point on a new line starting with · "
+      "trendSummary": "2 sentences max describing the pattern. Plain English, no individual details.",
+      "lessonLearned": "1 sentence — the key takeaway for pilots.",
+      "actionsForPilots": "2-3 bullet points, each on a new line starting with · "
     }
   ],
   "whatWeActed": [
     {
-      "change": "one sentence describing what changed operationally as a result of reports"
+      "change": "one short sentence describing what changed operationally"
     }
   ],
-  "seriousFlag": true or false,
-  "seriousFlagReason": "if seriousFlag is true, brief reason why one report warrants its own dedicated section"
+  "seriousFlag": false,
+  "seriousFlagReason": ""
 }
 
-Identify 1-3 themes maximum. If there is genuinely only one theme, return one. Do not invent themes to pad the bulletin.
-For whatWeActed, only include items where a closed action clearly represents an operational change — not admin tasks.`;
+Return 1-3 themes maximum. Only include whatWeActed entries where a closed action clearly represents an operational change.`;
 
-    // Sanitise reports — remove reporter details and names before sending to AI
+    // Sanitise and trim reports
     const sanitisedReports = reports.map(r => ({
       id: r.id,
       incidentDate: r.incidentDate,
       title: r.title,
-      aircraft: r.aircraft,
-      location: r.location,
-      picType: r.picType,
-      operationalArea: r.operationalArea,
-      what: r.what,
+      aircraft: r.aircraft || "—",
+      operationalArea: r.operationalArea || "—",
+      what: (r.what || "").slice(0, 200),
     }));
 
-    // Only include closed actions in the period for "what we acted" section
+    // Only closed actions in period
     const closedActions = (actions || []).filter(a =>
       !a.deletedAt &&
       a.status === "Closed" &&
@@ -67,16 +59,15 @@ For whatWeActed, only include items where a closed action clearly represents an 
       a.closedDate <= dateTo
     );
 
-    const userMessage = `Please draft a Flight Safety Bulletin for the period ${dateFrom} to ${dateTo} (Issue ${issueNumber}).
+    const userMessage = `Draft a Flight Safety Bulletin for ${dateFrom} to ${dateTo} (Issue ${issueNumber}).
 
-REPORTS IN THIS PERIOD (${sanitisedReports.length} reports):
-${sanitisedReports.map(r => `[${r.incidentDate}] ${r.title} | Aircraft: ${r.aircraft || "—"} | Area: ${r.operationalArea || "—"} | PIC: ${r.picType || "—"}
-What happened: ${(r.what || "").slice(0, 300)}`).join("\n\n")}
+REPORTS (${sanitisedReports.length}):
+${sanitisedReports.map(r => `[${r.incidentDate}] ${r.title} | ${r.aircraft} | ${r.operationalArea} | ${r.what}`).join("\n")}
 
-ACTIONS CLOSED IN THIS PERIOD (${closedActions.length} actions):
-${closedActions.map(a => `${a.id}: ${a.description} | Closed: ${a.closedDate} | Evidence: ${a.evidence || "none recorded"}`).join("\n")}
+CLOSED ACTIONS (${closedActions.length}):
+${closedActions.map(a => `${a.id}: ${(a.description || "").slice(0, 100)}`).join("\n")}
 
-Respond with valid JSON only.`;
+Respond with valid JSON only. Keep all text fields short.`;
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -87,7 +78,7 @@ Respond with valid JSON only.`;
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 4000,
+        max_tokens: 6000,
         system: systemPrompt,
         messages: [{ role: "user", content: userMessage }],
       }),
