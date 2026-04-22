@@ -1525,6 +1525,13 @@ function BulletinsTab({ reports, actions, currentUser, onAudit }) {
                     <div style={{ fontSize: 11, color: "#475569", marginTop: 3 }}>{b.reportCount} reports · {b.themeCount} themes · Generated {fmt(b.generatedAt)} by {b.generatedBy}</div>
                     {b.themes?.length > 0 && <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>{b.themes.join(" · ")}</div>}
                   </div>
+                  <button onClick={async () => {
+                    const newLog = bulletinLog.filter(x => x.id !== b.id);
+                    setBulletinLog(newLog);
+                    if (newLog.length === 0) setIssueNumber(1);
+                    else setIssueNumber(Math.max(...newLog.map(x => x.issueNumber)) + 1);
+                    await saveToStorage("sms:bulletins", newLog);
+                  }} style={{ ...btnSmall, background: "#ef444422", color: "#ef4444", border: "1px solid #ef444444", flexShrink: 0 }}>🗑 Delete</button>
                 </div>
               ))}
             </div>
