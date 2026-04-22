@@ -1398,6 +1398,9 @@ function BulletinsTab({ reports, actions, currentUser, onAudit }) {
     body { width: 210mm; }
     @page { size: A4; margin: 0; }
   }
+  @media screen {
+    body { max-width: 210mm; margin: 0 auto; padding: 0; }
+  }
 </style>
 </head>
 <body>
@@ -1445,37 +1448,15 @@ function BulletinsTab({ reports, actions, currentUser, onAudit }) {
 </body>
 </html>`;
 
-      // Use html2pdf.js loaded from CDN via a hidden iframe
-      await new Promise((resolve, reject) => {
-        const iframe = document.createElement("iframe");
-        iframe.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:210mm;height:297mm;";
-        document.body.appendChild(iframe);
-        iframe.onload = () => {
-          const iDoc = iframe.contentDocument || iframe.contentWindow.document;
-          iDoc.open();
-          iDoc.write(htmlContent);
-          iDoc.close();
-
-          const script = iDoc.createElement("script");
-          script.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
-          script.onload = () => {
-            const opt = {
-              margin: 0,
-              filename: `LSA-Safety-Bulletin-Issue-${issueNumber}-${dateFrom}.pdf`,
-              image: { type: "jpeg", quality: 0.98 },
-              html2canvas: { scale: 2, useCORS: true, logging: false },
-              jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-            };
-            iframe.contentWindow.html2pdf().set(opt).from(iDoc.body).save().then(() => {
-              document.body.removeChild(iframe);
-              resolve();
-            }).catch(reject);
-          };
-          script.onerror = reject;
-          iDoc.head.appendChild(script);
-        };
-        iframe.src = "about:blank";
-      });
+      // Open in new tab and trigger print-to-PDF
+      const printWindow = window.open("", "_blank");
+      if (!printWindow) throw new Error("Pop-up blocked — please allow pop-ups for this site and try again.");
+      printWindow.document.write(htmlContent);
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => {
+        printWindow.print();
+      }, 800);
 
       // Save to bulletin log
       const entry = {
