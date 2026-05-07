@@ -619,14 +619,419 @@ function RawReports({ reports, risks, onRaise, setReports, currentUser, onAudit 
   );
 }
 
+// ── Investigation Report Modal ────────────────────────────────────────────────
+function InvestigationReportModal({ risk, risks, setRisks, reports, actions, onAudit, currentUser, onClose }) {
+  const [narrative, setNarrative] = useState(risk.investigationNarrative || "");
+  const [drafting, setDrafting] = useState(false);
+  const [error, setError] = useState("");
+  const [saved, setSaved] = useState(false);
+  const [printing, setPrinting] = useState(false);
+
+  const linkedReports = reports.filter(r => !r.deletedAt && (r.id === risk.reportId || String(r.id) === String(risk.reportId)));
+  const linkedActions = actions.filter(a => !a.deletedAt && a.hazardId === risk.id);
+
+  const riskScore = (risk.initSeverity || 0) * (risk.initLikelihood || 0);
+  const { label: riskLabel, color: riskColor } = riskLevel(riskScore);
+  const resScore = risk.residualSeverity && risk.residualLikelihood ? risk.residualSeverity * risk.residualLikelihood : null;
+  const resLevelData = resScore ? riskLevel(resScore) : null;
+
+  const runAiDraft = async () => {
+    setDrafting(true);
+    setError("");
+    try {
+      const res = await fetch("/api/ai-investigation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ risk, linkedReports, linkedActions }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "AI draft failed");
+      setNarrative(data.narrative);
+    } catch (err) {
+      setError(err.message);
+    }
+    setDrafting(false);
+  };
+
+  const saveNarrative = () => {
+    setRisks(prev => prev.map(r => r.id === risk.id ? { ...r, investigationNarrative: narrative } : r));
+    onAudit("INVESTIGATION_SAVED", "Risk Register", `Saved investigation narrative for ${risk.id}`, risk.id);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2500);
+  };
+
+  const generatePrint = () => {
+    setPrinting(true);
+    setError("");
+    try {
+      const toStr = v => Array.isArray(v) ? v.join("\n") : (v || "");
+
+      const actionRows = linkedActions.map(a => {
+        const od = a.status !== "Closed" && a.targetDate && new Date(a.targetDate) < new Date();
+        const statusCol = a.status === "Closed" ? "#22c55e" : od ? "#ef4444" : "#f59e0b";
+        const priCol = a.priority === "HIGH" ? "#ef4444" : a.priority === "MEDIUM" ? "#f59e0b" : "#22c55e";
+        return `<tr>
+          <td style="padding:4pt 7pt;border-bottom:1pt solid #e2e8f0;font-size:8.5pt;color:#0c2340;font-weight:700;">${a.id}</td>
+          <td style="padding:4pt 7pt;border-bottom:1pt solid #e2e8f0;font-size:8.5pt;color:#334155;">${a.description || "—"}</td>
+          <td style="padding:4pt 7pt;border-bottom:1pt solid #e2e8f0;font-size:8.5pt;color:#334155;">${a.owner || "—"}</td>
+          <td style="padding:4pt 7pt;border-bottom:1pt solid #e2e8f0;font-size:8.5pt;text-align:center;"><span style="color:${priCol};font-weight:700;">${a.priority || "—"}</span></td>
+          <td style="padding:4pt 7pt;border-bottom:1pt solid #e2e8f0;font-size:8.5pt;color:#334155;">${a.targetDate ? new Date(a.targetDate).toLocaleDateString("en-GB") : "—"}</td>
+          <td style="padding:4pt 7pt;border-bottom:1pt solid #e2e8f0;font-size:8.5pt;"><span style="color:${statusCol};font-weight:700;">${a.status || "—"}</span></td>
+          <td style="padding:4pt 7pt;border-bottom:1pt solid #e2e8f0;font-size:8pt;color:#475569;">${a.closedDate ? new Date(a.closedDate).toLocaleDateString("en-GB") : "—"}</td>
+          <td style="padding:4pt 7pt;border-bottom:1pt solid #e2e8f0;font-size:8pt;color:#475569;">${a.evidence || "—"}</td>
+        </tr>`;
+      }).join("");
+
+      const sourceReportHtml = linkedReports.length > 0
+        ? linkedReports.map(r => `
+          <div style="background:#f8fafc;border:1pt solid #e2e8f0;border-radius:4pt;padding:8pt 10pt;margin-bottom:6pt;">
+            <div style="display:flex;gap:16pt;flex-wrap:wrap;">
+              <div><span style="font-size:7.5pt;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5pt;">Report ID</span><br/><span style="font-size:9pt;color:#0c2340;font-weight:700;">#${r.id}</span></div>
+              <div><span style="font-size:7.5pt;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5pt;">Date</span><br/><span style="font-size:9pt;color:#334155;">${r.incidentDate ? new Date(r.incidentDate).toLocaleDateString("en-GB") : "—"}</span></div>
+              <div><span style="font-size:7.5pt;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5pt;">Aircraft</span><br/><span style="font-size:9pt;color:#334155;">${r.aircraft || "—"}</span></div>
+              <div><span style="font-size:7.5pt;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5pt;">PIC Type</span><br/><span style="font-size:9pt;color:#334155;">${r.picType || "—"}</span></div>
+              <div><span style="font-size:7.5pt;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5pt;">Area</span><br/><span style="font-size:9pt;color:#334155;">${r.operationalArea || "—"}</span></div>
+            </div>
+            ${r.what ? `<div style="margin-top:6pt;font-size:8.5pt;color:#334155;line-height:1.5;">${r.what}</div>` : ""}
+          </div>`).join("")
+        : `<div style="font-size:9pt;color:#64748b;font-style:italic;">No source report linked.</div>`;
+
+      const narrativeParagraphs = (narrative || "").split(/\n\n+/)
+        .filter(p => p.trim())
+        .map(p => `<p style="margin:0 0 10pt;font-size:10pt;color:#1e293b;line-height:1.65;text-align:justify;">${p.replace(/\n/g, "<br/>")}</p>`)
+        .join("");
+
+      const riskScoreDisplay = riskScore;
+      const riskLevelDisplay = riskLabel;
+      const riskBadgeColor = riskColor;
+
+      const generatedDate = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" });
+      const generatedBy = currentUser?.name || "Unknown";
+
+      const htmlContent = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8"/>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:210mm; font-family:Arial,Helvetica,sans-serif; background:white; }
+  @page { size:A4; margin:0; }
+  @media print {
+    html, body { width:210mm; }
+    * { -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; color-adjust:exact !important; }
+    .no-print { display:none !important; }
+  }
+  table { border-collapse:collapse; width:100%; }
+  th { text-align:left; }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div style="background:#185fa5;padding:12pt 16pt;display:flex;align-items:center;justify-content:space-between;min-height:24mm;">
+  <div style="display:flex;align-items:center;gap:12pt;">
+    <div style="background:white;padding:5pt 12pt;border-radius:3pt;">
+      <span style="font-size:13pt;font-weight:900;color:#0c2340;letter-spacing:2pt;">LS AIRMOTIVE</span>
+    </div>
+    <div style="width:1pt;height:28pt;background:rgba(255,255,255,0.3);"></div>
+    <div>
+      <div style="font-size:14pt;font-weight:700;color:white;">Safety Investigation Report</div>
+      <div style="font-size:8.5pt;color:#b5d4f4;margin-top:2pt;">DTO.0258 &nbsp;·&nbsp; Oxford Airport EGTK &nbsp;·&nbsp; Hazard Ref: ${risk.id}</div>
+    </div>
+  </div>
+  <div style="display:flex;gap:6pt;align-items:center;">
+    <div style="background:rgba(255,255,255,0.18);border-radius:4pt;padding:7pt 12pt;text-align:center;">
+      <div style="font-size:20pt;font-weight:700;color:${riskBadgeColor};line-height:1;">${riskScoreDisplay}</div>
+      <div style="font-size:7pt;color:#b5d4f4;text-transform:uppercase;letter-spacing:.5pt;margin-top:2pt;">Init. Risk</div>
+    </div>
+    ${resScore ? `<div style="background:rgba(255,255,255,0.18);border-radius:4pt;padding:7pt 12pt;text-align:center;">
+      <div style="font-size:20pt;font-weight:700;color:${resLevelData.color};line-height:1;">${resScore}</div>
+      <div style="font-size:7pt;color:#b5d4f4;text-transform:uppercase;letter-spacing:.5pt;margin-top:2pt;">Residual</div>
+    </div>` : ""}
+    <div style="background:rgba(255,255,255,0.18);border-radius:4pt;padding:7pt 12pt;text-align:center;min-width:44pt;">
+      <div style="font-size:20pt;font-weight:700;color:white;line-height:1;">${linkedActions.length}</div>
+      <div style="font-size:7pt;color:#b5d4f4;text-transform:uppercase;letter-spacing:.5pt;margin-top:2pt;">Actions</div>
+    </div>
+  </div>
+</div>
+
+<!-- METADATA STRIP -->
+<div style="background:#f0f6ff;border-bottom:1pt solid #c9ddf5;padding:6pt 16pt;display:flex;gap:28pt;flex-wrap:wrap;">
+  <div><span style="font-size:7pt;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5pt;">Aircraft</span><br/><span style="font-size:9pt;color:#0c2340;font-weight:600;">${risk.aircraft || "—"}</span></div>
+  <div><span style="font-size:7pt;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5pt;">Date Identified</span><br/><span style="font-size:9pt;color:#0c2340;">${risk.dateIdentified ? new Date(risk.dateIdentified).toLocaleDateString("en-GB") : "—"}</span></div>
+  <div><span style="font-size:7pt;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5pt;">Category</span><br/><span style="font-size:9pt;color:#0c2340;">${risk.hazardCategory || "—"}</span></div>
+  <div><span style="font-size:7pt;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5pt;">Status</span><br/><span style="font-size:9pt;color:#0c2340;font-weight:600;">${risk.status || "—"}</span></div>
+  <div><span style="font-size:7pt;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5pt;">Action Owner</span><br/><span style="font-size:9pt;color:#0c2340;">${risk.actionOwner || "—"}</span></div>
+  <div><span style="font-size:7pt;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5pt;">Report Generated</span><br/><span style="font-size:9pt;color:#0c2340;">${generatedDate} by ${generatedBy}</span></div>
+</div>
+
+<!-- BODY -->
+<div style="padding:14pt 16pt 48pt;">
+
+  <!-- Hazard description -->
+  <div style="background:#0c2340;border-radius:4pt;padding:9pt 12pt;margin-bottom:10pt;">
+    <div style="font-size:7.5pt;font-weight:700;color:#7eb8e8;text-transform:uppercase;letter-spacing:.6pt;margin-bottom:4pt;">Hazard Description</div>
+    <div style="font-size:10pt;color:white;line-height:1.55;">${(risk.hazardDescription || "—").replace(/\n/g, "<br/>")}</div>
+  </div>
+
+  <!-- Risk scores side by side -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8pt;margin-bottom:10pt;">
+    <div style="border:1pt solid #e2e8f0;border-radius:4pt;padding:9pt 12pt;">
+      <div style="font-size:7.5pt;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.6pt;margin-bottom:6pt;">Initial Risk Assessment</div>
+      <div style="display:flex;gap:12pt;">
+        <div><div style="font-size:7pt;color:#94a3b8;">Severity</div><div style="font-size:18pt;font-weight:700;color:#0c2340;line-height:1.1;">${risk.initSeverity || "—"}</div></div>
+        <div style="color:#c0c8d5;align-self:center;">×</div>
+        <div><div style="font-size:7pt;color:#94a3b8;">Likelihood</div><div style="font-size:18pt;font-weight:700;color:#0c2340;line-height:1.1;">${risk.initLikelihood || "—"}</div></div>
+        <div style="color:#c0c8d5;align-self:center;">=</div>
+        <div><div style="font-size:7pt;color:#94a3b8;">Score</div><div style="font-size:18pt;font-weight:700;color:${riskBadgeColor};line-height:1.1;">${riskScoreDisplay}</div></div>
+        <div style="align-self:center;background:${riskBadgeColor}22;color:${riskBadgeColor};border:1pt solid ${riskBadgeColor}44;border-radius:3pt;padding:2pt 7pt;font-size:8pt;font-weight:700;">${riskLevelDisplay}</div>
+      </div>
+      <div style="margin-top:6pt;font-size:8.5pt;color:#475569;">Potential consequence: ${risk.potentialConsequence || "—"}</div>
+    </div>
+    <div style="border:1pt solid ${resScore ? resLevelData.color + "44" : "#e2e8f0"};border-radius:4pt;padding:9pt 12pt;background:${resScore ? "#f8fffe" : "white"};">
+      <div style="font-size:7.5pt;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.6pt;margin-bottom:6pt;">Residual Risk Assessment</div>
+      ${resScore ? `
+      <div style="display:flex;gap:12pt;">
+        <div><div style="font-size:7pt;color:#94a3b8;">Severity</div><div style="font-size:18pt;font-weight:700;color:#0c2340;line-height:1.1;">${risk.residualSeverity}</div></div>
+        <div style="color:#c0c8d5;align-self:center;">×</div>
+        <div><div style="font-size:7pt;color:#94a3b8;">Likelihood</div><div style="font-size:18pt;font-weight:700;color:#0c2340;line-height:1.1;">${risk.residualLikelihood}</div></div>
+        <div style="color:#c0c8d5;align-self:center;">=</div>
+        <div><div style="font-size:7pt;color:#94a3b8;">Score</div><div style="font-size:18pt;font-weight:700;color:${resLevelData.color};line-height:1.1;">${resScore}</div></div>
+        <div style="align-self:center;background:${resLevelData.color}22;color:${resLevelData.color};border:1pt solid ${resLevelData.color}44;border-radius:3pt;padding:2pt 7pt;font-size:8pt;font-weight:700;">${resLevelData.label}</div>
+      </div>` : `<div style="font-size:9pt;color:#94a3b8;font-style:italic;margin-top:6pt;">Not yet assessed.</div>`}
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8pt;margin-bottom:10pt;">
+    <div style="background:#fafaf8;border:1pt solid #e5e4de;border-radius:4pt;padding:9pt 12pt;">
+      <div style="font-size:7.5pt;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.6pt;margin-bottom:4pt;">Existing Controls</div>
+      <div style="font-size:9pt;color:#334155;line-height:1.55;">${(risk.existingControls || "None recorded.").replace(/\n/g, "<br/>")}</div>
+    </div>
+    <div style="background:#fafaf8;border:1pt solid #e5e4de;border-radius:4pt;padding:9pt 12pt;">
+      <div style="font-size:7.5pt;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.6pt;margin-bottom:4pt;">Additional Mitigation Required</div>
+      <div style="font-size:9pt;color:#334155;line-height:1.55;">${(risk.additionalMitigation || "None recorded.").replace(/\n/g, "<br/>")}</div>
+    </div>
+  </div>
+
+  <!-- Source reports -->
+  <div style="margin-bottom:10pt;">
+    <div style="font-size:7.5pt;font-weight:700;color:#185fa5;text-transform:uppercase;letter-spacing:.6pt;margin-bottom:5pt;">Source Report(s)</div>
+    ${sourceReportHtml}
+  </div>
+
+  <!-- Investigation narrative -->
+  ${narrative ? `
+  <div style="margin-bottom:10pt;">
+    <div style="font-size:7.5pt;font-weight:700;color:#185fa5;text-transform:uppercase;letter-spacing:.6pt;margin-bottom:6pt;">Investigation Narrative</div>
+    <div style="border-left:3pt solid #185fa5;padding-left:12pt;">
+      ${narrativeParagraphs}
+    </div>
+  </div>` : ""}
+
+  <!-- Actions table -->
+  ${linkedActions.length > 0 ? `
+  <div style="margin-bottom:10pt;">
+    <div style="font-size:7.5pt;font-weight:700;color:#185fa5;text-transform:uppercase;letter-spacing:.6pt;margin-bottom:6pt;">Associated Actions (${linkedActions.length})</div>
+    <table>
+      <thead>
+        <tr style="background:#f0f6ff;">
+          <th style="padding:5pt 7pt;font-size:7.5pt;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.5pt;border-bottom:1.5pt solid #c9ddf5;">Action ID</th>
+          <th style="padding:5pt 7pt;font-size:7.5pt;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.5pt;border-bottom:1.5pt solid #c9ddf5;">Description</th>
+          <th style="padding:5pt 7pt;font-size:7.5pt;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.5pt;border-bottom:1.5pt solid #c9ddf5;">Owner</th>
+          <th style="padding:5pt 7pt;font-size:7.5pt;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.5pt;border-bottom:1.5pt solid #c9ddf5;text-align:center;">Pri.</th>
+          <th style="padding:5pt 7pt;font-size:7.5pt;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.5pt;border-bottom:1.5pt solid #c9ddf5;">Target</th>
+          <th style="padding:5pt 7pt;font-size:7.5pt;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.5pt;border-bottom:1.5pt solid #c9ddf5;">Status</th>
+          <th style="padding:5pt 7pt;font-size:7.5pt;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.5pt;border-bottom:1.5pt solid #c9ddf5;">Closed</th>
+          <th style="padding:5pt 7pt;font-size:7.5pt;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.5pt;border-bottom:1.5pt solid #c9ddf5;">Evidence</th>
+        </tr>
+      </thead>
+      <tbody>${actionRows}</tbody>
+    </table>
+  </div>` : ""}
+
+  <!-- Monitoring -->
+  ${risk.monitoringMethod ? `
+  <div style="background:#f0f6ff;border:1pt solid #c9ddf5;border-radius:4pt;padding:9pt 12pt;margin-bottom:10pt;">
+    <div style="font-size:7.5pt;font-weight:700;color:#185fa5;text-transform:uppercase;letter-spacing:.6pt;margin-bottom:4pt;">Monitoring Method</div>
+    <div style="font-size:9pt;color:#334155;line-height:1.55;">${risk.monitoringMethod.replace(/\n/g, "<br/>")}</div>
+  </div>` : ""}
+
+</div>
+
+<!-- FOOTER -->
+<div style="border-top:2pt solid #185fa5;padding:5pt 16pt;display:flex;justify-content:space-between;position:fixed;bottom:0;left:0;right:0;background:white;">
+  <span style="font-size:7.5pt;color:#888;">LS Airmotive DTO.0258 &nbsp;·&nbsp; Oxford Airport EGTK &nbsp;·&nbsp; Safety Investigation Report — ${risk.id}</span>
+  <span style="font-size:7.5pt;color:#888;">Head of Training: T. Newell &nbsp; FE.466104D &nbsp;·&nbsp; Generated ${generatedDate}</span>
+</div>
+
+</body>
+</html>`;
+
+      const printWindow = window.open("", "_blank");
+      if (!printWindow) { setError("Pop-up blocked — please allow pop-ups for this site and try again."); setPrinting(false); return; }
+      printWindow.document.write(htmlContent);
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => { printWindow.print(); }, 800);
+    } catch (err) {
+      setError(err.message);
+    }
+    setPrinting(false);
+  };
+
+  const openActionsCount = linkedActions.filter(a => a.status !== "Closed").length;
+  const closedActionsCount = linkedActions.filter(a => a.status === "Closed").length;
+  const overdueCount = linkedActions.filter(a => isOverdue(a.targetDate, a.status)).length;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#000000bb", zIndex: 2000, display: "flex", alignItems: "flex-start", justifyContent: "center", overflowY: "auto", padding: "24px 16px" }}>
+      <div style={{ background: "#0a0f1e", border: "1px solid #1e293b", borderRadius: 12, width: "100%", maxWidth: 860, boxShadow: "0 24px 80px #00000088" }}>
+
+        {/* Modal header */}
+        <div style={{ background: "#185fa5", borderRadius: "12px 12px 0 0", padding: "14px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div style={{ background: "rgba(255,255,255,0.18)", borderRadius: 6, padding: "4px 12px" }}>
+              <span style={{ fontSize: 13, fontWeight: 900, color: "white", letterSpacing: 1.5 }}>LS AIRMOTIVE</span>
+            </div>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "white" }}>Safety Investigation Report</div>
+              <div style={{ fontSize: 11, color: "#b5d4f4", marginTop: 1 }}>Hazard Ref: {risk.id} &nbsp;·&nbsp; {risk.hazardDescription?.split("\n")[0]?.slice(0, 60)}{risk.hazardDescription?.length > 60 ? "…" : ""}</div>
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 6, padding: "6px 14px", color: "white", cursor: "pointer", fontSize: 13, fontWeight: 700 }}>✕ Close</button>
+        </div>
+
+        {/* Risk summary strip */}
+        <div style={{ background: "#0f172a", borderBottom: "1px solid #1e293b", padding: "12px 20px", display: "flex", gap: 24, flexWrap: "wrap" }}>
+          <div><div style={{ fontSize: 10, color: "#475569", textTransform: "uppercase", letterSpacing: ".7px", marginBottom: 2 }}>Aircraft</div><div style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 700 }}>{risk.aircraft || "—"}</div></div>
+          <div><div style={{ fontSize: 10, color: "#475569", textTransform: "uppercase", letterSpacing: ".7px", marginBottom: 2 }}>Date Identified</div><div style={{ fontSize: 13, color: "#e2e8f0" }}>{fmt(risk.dateIdentified)}</div></div>
+          <div><div style={{ fontSize: 10, color: "#475569", textTransform: "uppercase", letterSpacing: ".7px", marginBottom: 2 }}>Category</div><div style={{ fontSize: 12, color: "#94a3b8" }}>{risk.hazardCategory || "—"}</div></div>
+          <div><div style={{ fontSize: 10, color: "#475569", textTransform: "uppercase", letterSpacing: ".7px", marginBottom: 2 }}>Init. Risk</div><div><Badge color={riskColor}>{riskScore} – {riskLabel}</Badge></div></div>
+          {resScore && <div><div style={{ fontSize: 10, color: "#475569", textTransform: "uppercase", letterSpacing: ".7px", marginBottom: 2 }}>Residual</div><div><Badge color={resLevelData.color}>{resScore} – {resLevelData.label}</Badge></div></div>}
+          <div><div style={{ fontSize: 10, color: "#475569", textTransform: "uppercase", letterSpacing: ".7px", marginBottom: 2 }}>Status</div><div><StatusBadge status={risk.status} /></div></div>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            {openActionsCount > 0 && <Badge color="#38bdf8">{openActionsCount} open action{openActionsCount !== 1 ? "s" : ""}</Badge>}
+            {closedActionsCount > 0 && <Badge color="#22c55e">{closedActionsCount} closed</Badge>}
+            {overdueCount > 0 && <Badge color="#ef4444">{overdueCount} overdue ⚠</Badge>}
+            {linkedReports.length > 0 && <Badge color="#a78bfa">{linkedReports.length} source report{linkedReports.length !== 1 ? "s" : ""}</Badge>}
+          </div>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: "20px 20px 24px" }}>
+
+          {/* Narrative section */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "1px" }}>Investigation Narrative</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={runAiDraft}
+                  disabled={drafting}
+                  style={{ ...btnSmall, background: drafting ? "#1e293b" : "#7c3aed22", color: drafting ? "#475569" : "#a78bfa", border: `1px solid ${drafting ? "#334155" : "#7c3aed44"}`, opacity: drafting ? 0.6 : 1 }}
+                >
+                  {drafting ? "🤖 Drafting…" : "🤖 AI Draft"}
+                </button>
+              </div>
+            </div>
+            <textarea
+              value={narrative}
+              onChange={e => setNarrative(e.target.value)}
+              rows={14}
+              placeholder="Type your investigation narrative here, or use AI Draft to generate one from the linked data…"
+              style={{ ...inputStyle, resize: "vertical", lineHeight: 1.65, fontSize: 13 }}
+            />
+            <div style={{ fontSize: 11, color: "#475569", marginTop: 5 }}>
+              Write in flowing prose. This narrative will be used in CAA MOR responses, SRB documentation, and AAIB investigation support. {narrative.length > 0 && <span style={{ color: "#38bdf8" }}>{narrative.length} characters · ~{Math.ceil(narrative.split(/\s+/).length)} words</span>}
+            </div>
+          </div>
+
+          {error && <div style={{ background: "#450a0a", border: "1px solid #ef444433", borderRadius: 6, padding: "8px 12px", marginBottom: 14, fontSize: 12, color: "#fca5a5" }}>⚠ {error}</div>}
+
+          {/* Action buttons */}
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <button
+              onClick={saveNarrative}
+              style={{ ...btnPrimary, background: saved ? "#22c55e" : "#0ea5e9" }}
+            >
+              {saved ? "✓ Saved" : "💾 Save Narrative"}
+            </button>
+            <button
+              onClick={generatePrint}
+              disabled={printing}
+              style={{ ...btnPrimary, background: printing ? "#334155" : "#185fa5" }}
+            >
+              {printing ? "⏳ Generating…" : "📄 Print / Save as PDF"}
+            </button>
+            {risk.investigationNarrative && !narrative && (
+              <button onClick={() => setNarrative(risk.investigationNarrative)} style={btnSecondary}>↩ Restore Saved</button>
+            )}
+            <div style={{ fontSize: 11, color: "#475569", marginLeft: "auto" }}>
+              {risk.investigationNarrative ? <span style={{ color: "#22c55e" }}>✓ Narrative saved to this risk entry</span> : <span>No narrative saved yet</span>}
+            </div>
+          </div>
+
+          {/* Linked actions summary */}
+          {linkedActions.length > 0 && (
+            <div style={{ marginTop: 20, background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8, padding: "14px 16px" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "1px", marginBottom: 10 }}>Actions Linked to {risk.id} ({linkedActions.length})</div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ ...tableStyle }}>
+                  <thead><tr>{["Action ID", "Description", "Owner", "Priority", "Target", "Status", "Closed", "Evidence"].map(h => <th key={h} style={thStyle}>{h}</th>)}</tr></thead>
+                  <tbody>{linkedActions.map(a => {
+                    const od = isOverdue(a.targetDate, a.status);
+                    return (
+                      <tr key={a.id} style={{ background: od ? "#450a0a22" : undefined }}>
+                        <td style={tdStyle}><span style={{ color: "#38bdf8", fontWeight: 700 }}>{a.id}</span></td>
+                        <td style={{ ...tdStyle, maxWidth: 220, fontSize: 12 }}>{a.description}</td>
+                        <td style={tdStyle}>{a.owner}</td>
+                        <td style={tdStyle}><PriBadge p={a.priority} /></td>
+                        <td style={tdStyle}>{fmt(a.targetDate)}</td>
+                        <td style={tdStyle}><StatusBadge status={a.status} /></td>
+                        <td style={{ ...tdStyle, fontSize: 11 }}>{fmt(a.closedDate)}</td>
+                        <td style={{ ...tdStyle, fontSize: 11, maxWidth: 180, color: "#64748b" }}>{a.evidence || "—"}</td>
+                      </tr>
+                    );
+                  })}</tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Source reports summary */}
+          {linkedReports.length > 0 && (
+            <div style={{ marginTop: 14, background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8, padding: "14px 16px" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "1px", marginBottom: 10 }}>Source Report(s) ({linkedReports.length})</div>
+              {linkedReports.map(r => (
+                <div key={r.id} style={{ borderLeft: "3px solid #a78bfa", paddingLeft: 12, marginBottom: 10 }}>
+                  <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 4 }}>
+                    <span style={{ color: "#a78bfa", fontWeight: 700, fontSize: 12 }}>#{r.id}</span>
+                    <span style={{ color: "#94a3b8", fontSize: 12 }}>{fmt(r.incidentDate)}</span>
+                    <span style={{ color: "#94a3b8", fontSize: 12 }}>{r.aircraft || "—"}</span>
+                    <span style={{ color: "#64748b", fontSize: 12 }}>{r.operationalArea || "—"}</span>
+                  </div>
+                  {r.what && <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>{r.what.slice(0, 300)}{r.what.length > 300 ? "…" : ""}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Risk Register ─────────────────────────────────────────────────────────────
-function RiskRegister({ risks, setRisks, actions, setActions, reports, raiseTarget, onRaiseSave, onRaiseCancel, onAudit }) {
+function RiskRegister({ risks, setRisks, actions, setActions, reports, raiseTarget, onRaiseSave, onRaiseCancel, onAudit, currentUser }) {
   const [editing, setEditing] = useState(null);
+  const [investigationRiskId, setInvestigationRiskId] = useState(null);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [showDeleted, setShowDeleted] = useState(false);
   const [confirmDeleteRisk, setConfirmDeleteRisk] = useState(null);
   const active = risks.filter(r => !r.deletedAt);
+  const investigationRisk = investigationRiskId ? risks.find(r => r.id === investigationRiskId) : null;
   const deleted = risks.filter(r => !!r.deletedAt);
   const list = showDeleted ? deleted : active;
   const filtered = list.filter(r => (!search || (r.id + r.hazardDescription + r.aircraft).toLowerCase().includes(search.toLowerCase())) && (!filterStatus || r.status === filterStatus)).sort((a, b) => b.id.localeCompare(a.id));
@@ -691,6 +1096,18 @@ function RiskRegister({ risks, setRisks, actions, setActions, reports, raiseTarg
   if (editing) return <RiskEditor risk={editing} onSave={save} onCancel={() => setEditing(null)} onAddAction={addAction} reports={reports} />;
   return (
     <div>
+      {investigationRisk && (
+        <InvestigationReportModal
+          risk={investigationRisk}
+          risks={risks}
+          setRisks={setRisks}
+          reports={reports}
+          actions={actions}
+          onAudit={onAudit}
+          currentUser={currentUser}
+          onClose={() => setInvestigationRiskId(null)}
+        />
+      )}
       {confirmDeleteRisk && (
         <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <div style={{ background: "#0f172a", border: "1px solid #ef4444", borderRadius: 10, padding: 28, maxWidth: 400, width: "90%" }}>
@@ -750,6 +1167,7 @@ function RiskRegister({ risks, setRisks, actions, setActions, reports, raiseTarg
                   ) : (
                     <>
                       <button onClick={() => setEditing(r)} style={btnSmall}>Edit</button>
+                      <button onClick={() => setInvestigationRiskId(r.id)} style={{ ...btnSmall, background: r.investigationNarrative ? "#185fa533" : "#0ea5e922", color: r.investigationNarrative ? "#7eb8e8" : "#38bdf8", border: `1px solid ${r.investigationNarrative ? "#185fa555" : "#0ea5e944"}` }}>📄 {r.investigationNarrative ? "Report ✓" : "Report"}</button>
                       <button onClick={() => setConfirmDeleteRisk(r)} style={{ ...btnSmall, background: "#ef444422", color: "#ef4444", border: "1px solid #ef444444" }}>🗑</button>
                     </>
                   )}
@@ -2160,7 +2578,7 @@ export default function App() {
         {tab === "submit" && <SubmitReport onSubmit={addReport} />}
         {tab === "import" && <ExcelImport reports={reports} onImport={importReports} />}
         {tab === "rawreports" && <RawReports reports={reports} risks={risks} onRaise={raiseToRiskRegister} setReports={setReports} currentUser={currentUser} onAudit={onAudit} />}
-        {tab === "riskregister" && <RiskRegister risks={risks} setRisks={setRisks} actions={actions} setActions={setActions} reports={reports} raiseTarget={raiseTarget} onRaiseSave={handleRaiseSave} onRaiseCancel={() => setRaiseTarget(null)} onAudit={onAudit} />}
+        {tab === "riskregister" && <RiskRegister risks={risks} setRisks={setRisks} actions={actions} setActions={setActions} reports={reports} raiseTarget={raiseTarget} onRaiseSave={handleRaiseSave} onRaiseCancel={() => setRaiseTarget(null)} onAudit={onAudit} currentUser={currentUser} />}
         {tab === "actionlog" && <ActionLog actions={actions} setActions={setActions} risks={risks} onAudit={onAudit} />}
         {tab === "backups" && <BackupsTab onRestore={handleRestore} />}
         {tab === "export" && <ExportTab reports={reports} risks={risks} actions={actions} />}
