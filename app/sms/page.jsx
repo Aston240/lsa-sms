@@ -1,6 +1,6 @@
 // PATH: app/sms/page.jsx
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 // ── seed data ─────────────────────────────────────────────────────────────────
@@ -1987,6 +1987,7 @@ export default function App() {
   const [team, setTeam] = useState(null);
   const [webhookSecret, setWebhookSecret] = useState("lsa-sms-secret");
   const [ready, setReady] = useState(false);
+  const persistEnabled = useRef(false);
 
   // ── Auth check on mount ──
   useEffect(() => {
@@ -2008,15 +2009,16 @@ export default function App() {
       ]);
       setReports(r); setRisks(ri); setActions(a); setWebhookSecret(s); setTeam(t); setReady(true);
       takeBackup(r, ri, a);
+      persistEnabled.current = true;
     })();
   }, [currentUser]);
 
   // ── Persist on change ──
-  useEffect(() => { if (reports) saveToStorage("sms:reports", reports); }, [reports]);
-  useEffect(() => { if (risks) saveToStorage("sms:risks", risks); }, [risks]);
-  useEffect(() => { if (actions) saveToStorage("sms:actions", actions); }, [actions]);
-  useEffect(() => { if (team) saveToStorage("sms:team", team); }, [team]);
-  useEffect(() => { saveToStorage("sms:webhookSecret", webhookSecret); }, [webhookSecret]);
+  useEffect(() => { if (persistEnabled.current && reports) saveToStorage("sms:reports", reports); }, [reports]);
+  useEffect(() => { if (persistEnabled.current && risks) saveToStorage("sms:risks", risks); }, [risks]);
+  useEffect(() => { if (persistEnabled.current && actions) saveToStorage("sms:actions", actions); }, [actions]);
+  useEffect(() => { if (persistEnabled.current && team) saveToStorage("sms:team", team); }, [team]);
+  useEffect(() => { if (persistEnabled.current) saveToStorage("sms:webhookSecret", webhookSecret); }, [webhookSecret]);
 
   // ── Audit writer ──
   const onAudit = useCallback((action, tabName, detail, recordId = null) => {
